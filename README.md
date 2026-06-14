@@ -296,26 +296,36 @@ host, and an MCP *client* to whatever it is auditing. The split
 mirrors the source layout.
 
 ```
-+--------------------+        stdio / http        +-------------------+
-|       host         |  <----------------------->  |   target MCP      |
-| (claude code, etc) |                              |     server        |
-+--------------------+                              +-------------------+
-            ^                                                ^
-            | JSON-RPC on stdin/stdout                      | JSON-RPC
-            |                                                | over the
-            v                                                v chosen
-+--------------------+        spawn / dial        +-------------------+
-|     src/index.ts   |  ------------------------>  | src/target-client |
-|  (the probe)       |                              | (outbound client) |
-+--------------------+                              +-------------------+
-            |
-            | calls the pure modules
-            v
-+--------------------+   +---------------+   +----------------+   +--------------+
-|  src/schema-lint   |   |  src/fuzz.ts  |   | src/conformance |   | src/report   |
-|  (11 rules)        |   |  (generator)  |   |  (4-dim score) |   |  (markdown)  |
-+--------------------+   +---------------+   +----------------+   +--------------+
+      +--------------------------------------+
+      |  host  (Claude Code, IDE, an agent)  |
+      +--------------------------------------+
+                          |
+                          |  stdio JSON-RPC  (stdin / stdout)
+                          v
++--------------------------------------------------+
+|  MCProbe  -  one stdio MCP server                |
+|                                                  |
+|  src/index.ts       registers the probe_* tools  |
+|      |  then calls the pure modules:             |
+|      +--> src/schema-lint   (11 lint rules)      |
+|      +--> src/fuzz          (case generator)     |
+|      +--> src/conformance   (4-dimension score)  |
+|      +--> src/report        (markdown renderer)  |
+|      |                                           |
+|      v                                           |
+|  src/target-client  (outbound MCP client)        |
++--------------------------------------------------+
+                          |
+                          |  stdio / http JSON-RPC
+                          v
+              +---------------------+
+              |  target MCP server  |
+              +---------------------+
 ```
+
+The host talks only to MCProbe (stdio); MCProbe's `src/target-client`
+then dials the audited server over stdio or http. The probe sits in the
+middle — a server to its host, a client to its target.
 
 | Module | Role | I/O? |
 | --- | --- | --- |
