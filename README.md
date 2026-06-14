@@ -108,11 +108,12 @@ npm install
 npm run build
 ```
 
-Then save this as `audit.mjs` in the project root and run `node audit.mjs`.
-Swap the `url` (or use `transport: "stdio", command, args`) for any
-target:
+**Step 1 — create the script.** Paste this whole block into your
+terminal (still inside the `mcprobe` folder). It writes the file for you
+— don't paste the JavaScript directly into the shell, or it will error:
 
-```js
+```bash
+cat > audit.mjs <<'EOF'
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 const client = new Client({ name: "runner", version: "1.0.0" }, { capabilities: {} });
@@ -121,7 +122,17 @@ const call = async (n, a) => (await client.callTool({ name: n, arguments: a })).
 console.log(await call("probe_connect", { transport: "http", url: "https://docs.base.org/mcp" }));
 console.log(await call("probe_report", { fuzz: true }));
 await client.close(); process.exit(0);
+EOF
 ```
+
+**Step 2 — run it:**
+
+```bash
+node audit.mjs
+```
+
+Swap the `url` (or use `transport: "stdio", command, args`) to audit any
+other target.
 
 `fuzz: false` runs a read-only static audit (metadata + schema quality
 only). `fuzz: true` also **calls the target's tools with malformed
