@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "MCProbe audits MCP servers over the live protocol by linting tool schemas and behaviorally fuzzing them with broken inputs.",
   "type": "module",
+  "license": "MIT",
   "main": "dist/index.js",
   "bin": {
     "mcprobe": "dist/index.js"
