@@ -1,0 +1,12 @@
+{
+  "name": "mcprobe-demo-target",
+  "version": "0.1.0",
+  "description": "Deliberately flawed MCP target used to demonstrate MCProbe's lint and fuzz findings.",
+  "type": "module",
+  "main": "dist/index.js",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  }
+}
