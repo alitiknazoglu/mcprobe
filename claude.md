@@ -69,7 +69,7 @@ mcprobe/
 │   ├── schema-lint.test.ts  # 11 rules + invariants
 │   ├── fuzz.test.ts         # generator, classifier, summarizer
 │   └── demo-target.test.ts  # live spawn of examples/demo-target
-└── dist/                 # tsc output for the probe (committed-friendly)
+└── dist/                 # tsc output for the probe (gitignored; produced by `npm run build`)
     └── examples/demo-target/dist/  # tsc output for the demo target
 ```
 

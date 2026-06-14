@@ -67,6 +67,58 @@ npm start
 No port, no daemon, no config file. The probe speaks JSON-RPC on
 stdin/stdout and writes operator logs to stderr.
 
+## Quickstart — audit any MCP server
+
+Two ways to point MCProbe at a target. You only ever register *MCProbe*;
+it dials the target itself, so the target needs no setup.
+
+### Option 1 — from an MCP client (Claude Desktop, Cursor, any host)
+
+Add MCProbe to your client's MCP config (use the absolute path to the
+built `dist/index.js`):
+
+```json
+{
+  "mcpServers": {
+    "mcprobe": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcprobe/dist/index.js"]
+    }
+  }
+}
+```
+
+Then ask in plain English:
+
+> Use mcprobe to audit `https://docs.base.org/mcp` over http — connect,
+> then run a full report with fuzz and show me the score.
+
+The host calls `probe_connect` then `probe_report` for you. MCProbe also
+advertises server `instructions`, so the model is told the flow on
+connect — no need to memorise the tool names.
+
+### Option 2 — no host, pure terminal
+
+Save this as `audit.mjs` in the project root and run `node audit.mjs`.
+Swap the `url` (or use `transport: "stdio", command, args`) for any
+target:
+
+```js
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+const client = new Client({ name: "runner", version: "1.0.0" }, { capabilities: {} });
+await client.connect(new StdioClientTransport({ command: "node", args: ["dist/index.js"] }));
+const call = async (n, a) => (await client.callTool({ name: n, arguments: a })).content.map(c => c.text).join("\n");
+console.log(await call("probe_connect", { transport: "http", url: "https://docs.base.org/mcp" }));
+console.log(await call("probe_report", { fuzz: true }));
+await client.close(); process.exit(0);
+```
+
+`fuzz: false` runs a read-only static audit (metadata + schema quality
+only). `fuzz: true` also **calls the target's tools with malformed
+inputs** to score error handling and liveness — only fuzz servers you
+trust or that are read-only.
+
 ## The six `probe_*` tools
 
 MCProbe registers four core tools and two optional helpers. The core
