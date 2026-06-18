@@ -174,39 +174,48 @@ export class ConnectionRegistry {
 // Connect helpers
 // ---------------------------------------------------------------------------
 
-/** Best-effort count of "advertised" resources. We treat the capability
- *  being present (even empty `{}`) as "yes, the server exposes these" and
- *  trust `list*` to give us the actual count, falling back to 0 on
- *  "method not found" so a sparse target does not blow up the handshake. */
-async function safeList(
+/** Per-request timeout for introspection list calls. A target that never
+ *  answers a `list*` request would otherwise stall the connect for the SDK's
+ *  default request timeout (60s); a short bound makes a silent server fail
+ *  fast so the audit can continue. */
+const LIST_TIMEOUT_MS = 15_000;
+
+/**
+ * Best-effort enumeration of a target's tools/resources/prompts.
+ *
+ * Introspection must never crash the probe. A target may not implement an
+ * optional method (it returns -32601 "method not found"), or it may simply
+ * never respond — in which case the SDK times out (-32001). Some servers do
+ * the latter even for methods they don't support. Either way we degrade to an
+ * empty list and let the audit continue, rather than letting the error escape
+ * and kill the connection. A bounded per-request timeout keeps a silent
+ * server from stalling the whole connect.
+ *
+ * Exported for unit testing.
+ */
+export async function safeList(
   client: Client,
   method: "tools" | "resources" | "prompts"
 ): Promise<unknown[]> {
+  const options = { timeout: LIST_TIMEOUT_MS };
   try {
     if (method === "tools") {
-      const r = await client.listTools();
+      const r = await client.listTools(undefined, options);
       return r.tools ?? [];
     }
     if (method === "resources") {
-      const r = await client.listResources();
+      const r = await client.listResources(undefined, options);
       return r.resources ?? [];
     }
-    const r = await client.listPrompts();
+    const r = await client.listPrompts(undefined, options);
     return r.prompts ?? [];
   } catch (err) {
-    // SDK signals "method not found" with code -32601 inside an
-    // McpError. Anything matching that signature, or a generic
-    // connection error, is treated as "not advertised" — count 0.
-    const msg = (err as Error).message ?? "";
-    if (
-      msg.includes("Method not found") ||
-      msg.includes("-32601") ||
-      msg.toLowerCase().includes("not implemented")
-    ) {
-      return [];
-    }
-    // For other errors, re-throw — the caller wants to know.
-    throw err;
+    // Any failure — "method not found", a request timeout, or a transport
+    // error — means we couldn't enumerate this feature. Count 0 and move on.
+    console.error(
+      `[mcprobe] ${method}/list unavailable (${(err as Error).message ?? String(err)}); counting 0`
+    );
+    return [];
   }
 }
 
@@ -261,8 +270,16 @@ async function finalizeConnection(
   const tools = ((await safeList(client, "tools")) as unknown[]).map(
     toToolSummary
   );
-  const resources = await safeList(client, "resources");
-  const prompts = await safeList(client, "prompts");
+  // Only query the optional features the server actually advertised. A server
+  // that doesn't support resources/prompts may stay silent rather than return
+  // "method not found", which would otherwise stall the connect until the
+  // request times out. Gating on the advertised capability avoids the hang.
+  const resources = capabilities.resources
+    ? await safeList(client, "resources")
+    : [];
+  const prompts = capabilities.prompts
+    ? await safeList(client, "prompts")
+    : [];
 
   return {
     id: newConnectionId(),
