@@ -2,7 +2,7 @@
 //
 // One `it()` per lint rule, each fed a synthetic ToolSummary crafted
 // to trip exactly that rule (and ideally no others) so the assertion
-// is precise. The 11 codes covered here mirror the FindingCode union
+// is precise. The 12 codes covered here mirror the FindingCode union
 // in src/types.ts, which in turn mirrors the spec section §6.
 
 import { describe, it, expect } from "vitest";
@@ -43,13 +43,14 @@ const CLEAN_TOOL: ToolSummary = {
     },
     required: ["arg"],
   },
+  annotations: { readOnlyHint: true },
 };
 
 // ---------------------------------------------------------------------------
 // The 11 lint rules
 // ---------------------------------------------------------------------------
 
-describe("schema-lint — 11 lint rules", () => {
+describe("schema-lint — 12 lint rules", () => {
   it("rule 1: flags tool.missing_description when description is absent", () => {
     const tool: ToolSummary = { ...CLEAN_TOOL, description: undefined };
     const findings = lintTools([tool], true);
@@ -207,6 +208,30 @@ describe("schema-lint — 11 lint rules", () => {
     const findings = lintTools([], false);
     expect(findOne(findings, "server.no_tools")).toBeUndefined();
   });
+
+  it("rule 12: flags tool.no_annotations when a tool declares no annotations", () => {
+    const tool: ToolSummary = { ...CLEAN_TOOL, annotations: undefined };
+    const findings = lintTools([tool], true);
+    const f = findOne(findings, "tool.no_annotations");
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe("info");
+    expect(f?.location).toEqual({ tool: "clean_tool" });
+    expect(f?.message).toMatch(/no annotations/i);
+    // An otherwise-clean tool trips only this rule.
+    expect(findings).toHaveLength(1);
+  });
+
+  it("rule 12 (negative): does NOT flag tool.no_annotations when annotations are present", () => {
+    // CLEAN_TOOL carries annotations, so the rule must stay silent.
+    const findings = lintTools([CLEAN_TOOL], true);
+    expect(findOne(findings, "tool.no_annotations")).toBeUndefined();
+  });
+
+  it("rule 12: treats an empty annotations object the same as none", () => {
+    const tool: ToolSummary = { ...CLEAN_TOOL, annotations: {} };
+    const findings = lintTools([tool], true);
+    expect(findOne(findings, "tool.no_annotations")).toBeDefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -221,7 +246,7 @@ describe("schema-lint — invariants", () => {
     expect(findings).toEqual([]);
   });
 
-  it("every emitted finding has a code from the 11-rule union", () => {
+  it("every emitted finding has a code from the 12-rule union", () => {
     const all: ToolSummary[] = [
       { ...CLEAN_TOOL, name: "t1" },
       {
@@ -251,6 +276,7 @@ describe("schema-lint — invariants", () => {
       "schema.no_required",
       "param.untyped",
       "param.missing_description",
+      "tool.no_annotations",
       "server.no_tools",
     ];
     for (const f of findings) {

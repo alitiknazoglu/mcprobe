@@ -30,7 +30,7 @@ smells are real, but a static audit cannot tell you whether the server
 
 MCProbe does both, on a single connection:
 
-1. **Static lint.** Eleven rules over every tool's schema: missing or
+1. **Static lint.** Twelve rules over every tool's schema: missing or
    thin descriptions, duplicate or unusual names, an empty or
    non-object schema, untyped or undocumented parameters, and a
    server-wide rule for "I said I had tools but I have none."
@@ -148,7 +148,7 @@ cover the everyday ergonomics of managing connections.
 | Tool | Purpose | Returns |
 | --- | --- | --- |
 | `probe_connect` | Open a connection to a target. | `{ connectionId, name, version, capabilities, counts, defaultConnectionId }` |
-| `probe_lint` | Run the 11 lint rules over the target's cached tool summaries. | `{ connectionId, server, findings, summary }` |
+| `probe_lint` | Run the 12 lint rules over the target's cached tool summaries. | `{ connectionId, server, findings, summary }` |
 | `probe_fuzz` | Generate valid + malformed inputs per tool, call each, classify the outcome. | `{ connectionId, server, results, summary }` |
 | `probe_report` | Run lint (and fuzz when requested), score, render Markdown. | `{ connectionId, server, overall, grade, dimensions, findings, fuzz, markdown }` |
 | `probe_list` | (optional) Enumerate the target's tools. | `{ connectionId, server, tools }` |
@@ -181,7 +181,7 @@ round-trip. Each finding carries a stable `code`, a `severity`
 (`error`, `warning`, `info`), a human-readable `message`, a
 `location` (`{ tool, param? }`), and a `hint` with a concrete fix.
 
-The eleven rules are:
+The twelve rules are:
 
 | Code | Severity | What it catches |
 | --- | --- | --- |
@@ -190,6 +190,7 @@ The eleven rules are:
 | `tool.duplicate_name` | error | Two tools registered with the same name. |
 | `tool.unusual_name` | warning | A name that is not `snake_case` or `kebab-case`. |
 | `tool.no_input_schema` | warning | An empty or missing `inputSchema`. |
+| `tool.no_annotations` | info | A tool that declares no MCP annotations (`readOnlyHint`, `destructiveHint`, etc.). |
 | `schema.invalid` | error | A schema that fails to compile (Ajv). |
 | `schema.root_not_object` | warning | A root `type` that is not `object`. |
 | `schema.no_required` | info | Properties declared but no `required` array. |
@@ -327,7 +328,7 @@ mirrors the source layout.
 |                                                  |
 |  src/index.ts       registers the probe_* tools  |
 |      |  then calls the pure modules:             |
-|      +--> src/schema-lint   (11 lint rules)      |
+|      +--> src/schema-lint   (12 lint rules)      |
 |      +--> src/fuzz          (case generator)     |
 |      +--> src/conformance   (4-dimension score)  |
 |      +--> src/report        (markdown renderer)  |
@@ -354,7 +355,7 @@ server to its caller, a client to its target.
 | --- | --- | --- |
 | `src/types.ts` | Shared `Finding`, `FuzzResult`, `DimensionScore`, `ConformanceReport` types. | none |
 | `src/target-client.ts` | Outbound MCP client, `ConnectionRegistry`, `callTool` wrapper that catches transport errors. | yes — spawns / dials |
-| `src/schema-lint.ts` | The 11 lint rules. Pure: no I/O, deterministic ordering. | none |
+| `src/schema-lint.ts` | The 12 lint rules. Pure: no I/O, deterministic ordering. | none |
 | `src/fuzz.ts` | Case generator + runner + `summarizeFuzz` histogram. Generator is pure; runner threads through a caller-supplied `call` fn so it stays unit-testable. | none on the generator; the runner calls the target |
 | `src/conformance.ts` | Per-dimension scoring + rollup. Pure. | none |
 | `src/report.ts` | Pure Markdown renderer. Same input → same output every run. | none |

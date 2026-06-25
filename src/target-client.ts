@@ -224,11 +224,16 @@ function toToolSummary(raw: unknown): ToolSummary {
     name?: string;
     description?: string;
     inputSchema?: Record<string, unknown>;
+    annotations?: Record<string, unknown>;
   };
   return {
     name: String(t.name ?? ""),
     description: typeof t.description === "string" ? t.description : undefined,
     inputSchema: t.inputSchema ?? { type: "object", properties: {} },
+    annotations:
+      t.annotations && typeof t.annotations === "object"
+        ? t.annotations
+        : undefined,
   };
 }
 

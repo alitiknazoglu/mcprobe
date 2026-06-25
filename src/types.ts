@@ -15,6 +15,7 @@ export type FindingCode =
   | "schema.no_required"
   | "param.untyped"
   | "param.missing_description"
+  | "tool.no_annotations"
   | "server.no_tools";
 
 export interface FindingLocation {
@@ -34,6 +35,9 @@ export interface ToolSummary {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  /** MCP tool annotations (readOnlyHint, destructiveHint, etc.), if the
+   *  target declared any. Absent or empty means none were advertised. */
+  annotations?: Record<string, unknown>;
 }
 
 export type FuzzOutcome = "ok" | "toolError" | "protocolCrash";

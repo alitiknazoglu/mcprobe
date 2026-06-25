@@ -46,7 +46,7 @@ mcprobe/
 ├── src/
 │   ├── types.ts          # shared types (Finding, FuzzResult, Score, ...)
 │   ├── target-client.ts  # outbound MCP client + ConnectionRegistry
-│   ├── schema-lint.ts    # 11 lint rules -> Finding[]
+│   ├── schema-lint.ts    # 12 lint rules -> Finding[]
 │   ├── fuzz.ts           # JSON-Schema -> valid + malformed cases
 │   ├── conformance.ts    # orchestrator + 4-dimension scoring
 │   ├── report.ts         # pure Markdown renderer
@@ -66,7 +66,7 @@ mcprobe/
 │   ├── self-audit.mjs    # drives probe_report against a second copy of itself
 │   └── external-audit.mjs # drives probe_report against a third-party MCP server
 ├── tests/                # vitest suites
-│   ├── schema-lint.test.ts  # 11 rules + invariants
+│   ├── schema-lint.test.ts  # 12 rules + invariants
 │   ├── fuzz.test.ts         # generator, classifier, summarizer
 │   └── demo-target.test.ts  # live spawn of examples/demo-target
 └── dist/                 # tsc output for the probe (gitignored; produced by `npm run build`)
@@ -177,7 +177,7 @@ lint, transport, stdio, capability, severity, finding.
 3. Add a test in `tests/schema-lint.test.ts` that feeds a synthetic
    `ToolSummary` crafted to trip **only** the new rule, and asserts
    the returned `code` and `severity`. Update the `ALLOWED` array
-   in the "every emitted finding has a code from the 11-rule union"
+   in the "every emitted finding has a code from the 12-rule union"
    test so it covers the new code.
 4. Document the new rule in README.md's lint-rules table under
    `### \`probe_lint\``.

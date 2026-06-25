@@ -112,6 +112,21 @@ function lintOneTool(
     });
   }
 
+  // (12) tool.no_annotations — info-level nudge. Annotations are optional
+  //      in MCP, but a tool that declares none gives an agent no signal
+  //      about side effects (read-only vs destructive vs open-world).
+  //      Checked here, before the schema rules' early return, so it fires
+  //      even on a tool with no input schema.
+  if (!tool.annotations || Object.keys(tool.annotations).length === 0) {
+    out.push({
+      code: "tool.no_annotations",
+      severity: "info",
+      message: `Tool '${tool.name}' declares no annotations.`,
+      location: { tool: tool.name },
+      hint: "Add MCP annotations (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) so agents can reason about side effects before calling.",
+    });
+  }
+
   // (5) tool.no_input_schema
   const schema = tool.inputSchema;
   if (!schema || typeof schema !== "object" || Object.keys(schema).length === 0) {
