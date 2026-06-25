@@ -164,6 +164,9 @@ lint, transport, stdio, capability, severity, finding.
 7. Update README.md's `## The six \`probe_*\` tools` table to list
    the new tool — and adjust the surrounding sentence that says
    "four core + two optional helpers" if the count changes.
+8. Update `scripts/smoke-list-tools.mjs`'s `CORE_TOOLS` / `OPTIONAL_TOOLS`
+   arrays — that script asserts the probe advertises exactly those — and
+   the "six tools" heading/count in README and claude.md if it changes.
 
 ## Adding a new lint rule
 
@@ -181,6 +184,13 @@ lint, transport, stdio, capability, severity, finding.
    test so it covers the new code.
 4. Document the new rule in README.md's lint-rules table under
    `### \`probe_lint\``.
+5. Add the new code to `scripts/smoke-lint.mjs`'s `REQUIRED_CODES`
+   array — that script asserts every emitted finding's code is a
+   member, so a missing entry makes the smoke test fail — and bump its
+   "N-rule set" comments.
+6. Keep the docs consistent: add the code to the lint-rules list in
+   `docs/requirements/*-mcprobe-spec.md` (§6) and update the rule-count
+   references in `docs/plans/*.md`.
 
 ## Adding a new fuzz case category
 

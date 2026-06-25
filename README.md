@@ -284,6 +284,11 @@ manually is a good way to see the request/response shape.
 
 ## External server example
 
+For a full `probe_connect` → `probe_report` → `probe_disconnect`
+walkthrough as an AI agent would run it (natural-language request, the
+JSON tool calls, and the rendered report), see
+[examples/agent-usage.md](examples/agent-usage.md).
+
 The probe is not coupled to the demo target. To audit any other
 MCP server, swap the `command`/`args` in `probe_connect`:
 

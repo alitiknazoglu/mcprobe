@@ -11,7 +11,8 @@
   "files": [
     "dist",
     "README.md",
-    "claude.md"
+    "claude.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p examples/demo-target/tsconfig.json",
