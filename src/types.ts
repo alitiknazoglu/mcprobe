@@ -57,6 +57,21 @@ export interface FuzzResult {
   errorMessage?: string;
 }
 
+/** Which of the target's tools were actually fuzzed, and why some were
+ *  skipped. Surfaced in the report so the behavioral score's coverage is
+ *  explicit rather than implied. */
+export interface FuzzCoverage {
+  /** Total tools the target advertises. */
+  totalTools: number;
+  /** Tools that were actually fuzzed (eligible, within the maxTools cap). */
+  fuzzedTools: number;
+  /** Tools skipped because they are annotated `destructiveHint: true` and
+   *  `fuzzDestructive` was not set (the dry-run safety default). */
+  skippedDestructive: string[];
+  /** Tools skipped because they fell outside the `maxTools` cap. */
+  skippedOverCap: string[];
+}
+
 export type Grade = "A" | "B" | "C" | "D" | "F";
 
 export interface DimensionScore {
@@ -78,4 +93,6 @@ export interface ConformanceReport {
   dimensions: DimensionScore[];
   findings: Finding[];
   fuzz: FuzzResult[];
+  /** Present only when fuzzing ran. Describes how many tools were covered. */
+  coverage?: FuzzCoverage;
 }

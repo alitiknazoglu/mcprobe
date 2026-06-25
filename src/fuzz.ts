@@ -14,7 +14,13 @@
 // runner takes a caller-supplied call function (defaults to target-client
 // callTool) so it stays unit-testable against an in-memory fake.
 
-import type { ToolSummary, FuzzCase, FuzzResult, FuzzOutcome } from "./types.js";
+import type {
+  ToolSummary,
+  FuzzCase,
+  FuzzResult,
+  FuzzOutcome,
+  FuzzCoverage,
+} from "./types.js";
 import type { CallToolResult } from "./target-client.js";
 import { callTool as defaultCallTool } from "./target-client.js";
 import type { Connection } from "./target-client.js";
@@ -33,8 +39,19 @@ export type CallFn = (
 export interface RunFuzzOptions {
   /** Cap on the number of tools to fuzz. Defaults to 10 (per spec §4.3). */
   maxTools?: number;
+  /** Also fuzz tools annotated `destructiveHint: true`. Off by default —
+   *  the dry-run safety guard — so fuzzing a server you don't control can't
+   *  trigger a real destructive action. */
+  fuzzDestructive?: boolean;
   /** Override the call function (used by tests). */
   call?: CallFn;
+}
+
+/** What `runFuzz` returns: the per-case results plus a coverage summary
+ *  describing which tools were fuzzed and which were skipped (and why). */
+export interface FuzzRun {
+  results: FuzzResult[];
+  coverage: FuzzCoverage;
 }
 
 export interface FuzzSummary {
@@ -183,24 +200,45 @@ export function generateCases(schema: unknown): FuzzCase[] {
 // Runner
 // ---------------------------------------------------------------------------
 
+/** True when the tool is annotated `destructiveHint: true`. Such tools are
+ *  skipped by default (the dry-run guard) so fuzzing an untrusted target
+ *  can't trigger a real destructive action; pass `fuzzDestructive` to
+ *  override. */
+export function isDestructive(tool: ToolSummary): boolean {
+  return tool.annotations?.destructiveHint === true;
+}
+
 /** Run the generated cases against the target and classify each outcome.
  *  Pure orchestration: it does not write to any global state; the
  *  caller (the handler in index.ts) threads the result through
- *  conformance scoring and the report renderer. */
+ *  conformance scoring and the report renderer.
+ *
+ *  Returns the per-case results plus a coverage summary. By default,
+ *  tools marked `destructiveHint: true` are skipped (recorded under
+ *  coverage.skippedDestructive) and the `maxTools` cap is applied to the
+ *  remaining eligible tools. */
 export async function runFuzz(
   connection: Connection,
   tools: ToolSummary[],
   options: RunFuzzOptions = {}
-): Promise<FuzzResult[]> {
+): Promise<FuzzRun> {
   const maxTools = options.maxTools ?? 10;
+  const fuzzDestructive = options.fuzzDestructive ?? false;
   const call: CallFn = options.call
     ? options.call
     : (name, args) => defaultCallTool(connection, name, args);
 
-  const results: FuzzResult[] = [];
-  const targets = tools.slice(0, maxTools);
+  // Dry-run safety: unless explicitly opted in, never invoke a tool the
+  // target marks destructive. Eligible tools are then capped by maxTools.
+  const destructive = tools.filter(isDestructive);
+  const eligible = fuzzDestructive
+    ? tools
+    : tools.filter((t) => !isDestructive(t));
+  const fuzzed = eligible.slice(0, maxTools);
+  const overCap = eligible.slice(maxTools);
 
-  for (const tool of targets) {
+  const results: FuzzResult[] = [];
+  for (const tool of fuzzed) {
     const cases = generateCases(tool.inputSchema);
     for (const c of cases) {
       const result = await runOneCase(call, tool.name, c);
@@ -208,7 +246,14 @@ export async function runFuzz(
     }
   }
 
-  return results;
+  const coverage: FuzzCoverage = {
+    totalTools: tools.length,
+    fuzzedTools: fuzzed.length,
+    skippedDestructive: fuzzDestructive ? [] : destructive.map((t) => t.name),
+    skippedOverCap: overCap.map((t) => t.name),
+  };
+
+  return { results, coverage };
 }
 
 // ---------------------------------------------------------------------------

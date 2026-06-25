@@ -67,7 +67,9 @@ mcprobe/
 │   └── external-audit.mjs # drives probe_report against a third-party MCP server
 ├── tests/                # vitest suites
 │   ├── schema-lint.test.ts  # 12 rules + invariants
-│   ├── fuzz.test.ts         # generator, classifier, summarizer
+│   ├── fuzz.test.ts         # generator, classifier, summarizer, dry-run + coverage
+│   ├── conformance.test.ts  # normalized scoring + no-overlap + coverage rendering
+│   ├── target-client.test.ts # safeList tolerance (introspection never crashes)
 │   └── demo-target.test.ts  # live spawn of examples/demo-target
 └── dist/                 # tsc output for the probe (gitignored; produced by `npm run build`)
     └── examples/demo-target/dist/  # tsc output for the demo target
@@ -198,10 +200,35 @@ lint, transport, stdio, capability, severity, finding.
    `FuzzCase[]` with one valid and at least three malformed variants.
 2. Append a new `label` and `args` shape to the generator. Mark the
    new case `{ malformed: true }` so the runner can flag
-   silently-accepted outcomes.
+   silently-accepted outcomes. The label must **not** be `"valid"` —
+   the scorer partitions cases by `case === "valid"` (valid → Liveness,
+   everything else → Error Handling), so a malformed case needs a
+   distinct label.
 3. Add a unit test in `tests/fuzz.test.ts` that exercises the new
    case shape against a synthetic primitive schema.
 4. Document the new case label in README.md's "`probe_fuzz`" section.
+
+## Fuzzing and scoring
+
+- **Dry-run default.** `runFuzz` (src/fuzz.ts) skips tools annotated
+  `destructiveHint: true` unless `fuzzDestructive` is set, and applies the
+  `maxTools` cap to the remaining eligible tools. It returns
+  `{ results, coverage }`; `coverage` (totalTools / fuzzedTools /
+  skippedDestructive / skippedOverCap) is threaded into the report and
+  rendered as the header **Coverage** line. The header also carries a
+  **critical-issues callout** (`renderCriticalLine` in src/report.ts) —
+  a flag listing silent-accepting tools + crash count, *not* a second
+  score; the normalized scores are untouched.
+- **Normalized, non-overlapping scoring** (src/conformance.ts). The two
+  behavioral dimensions are rate-based so scores compare across server
+  sizes, and they **partition the fuzz cases by kind** — malformed cases
+  score Error Handling (`graceful / malformed`), valid cases score
+  Liveness (`ok / valid`). Never score a case in both dimensions; that
+  double-count was removed on purpose. `conformance.test.ts` pins both
+  rates and the no-overlap guarantee.
+- When fuzz is requested but no case ran (every tool skipped), the
+  behavioral dimensions report **not measured** and drop out of the
+  rollup — the same path as a static (`fuzz: false`) audit.
 
 ## Smoke and audit scripts
 

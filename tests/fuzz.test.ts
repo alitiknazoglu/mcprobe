@@ -19,8 +19,11 @@ import {
   summarizeFuzz,
   type CallFn,
   runOneCaseForTest,
+  runFuzz,
+  isDestructive,
 } from "../src/fuzz.js";
-import type { FuzzCase, FuzzResult } from "../src/types.js";
+import type { FuzzCase, FuzzResult, ToolSummary } from "../src/types.js";
+import type { Connection } from "../src/target-client.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -394,5 +397,95 @@ describe("fuzz — summarizeFuzz", () => {
     const s = summarizeFuzz(rows);
     const perToolTotal = s.perTool.reduce((acc, p) => acc + p.total, 0);
     expect(perToolTotal).toBe(s.total);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runFuzz — dry-run safety + coverage (Features 1 & 2)
+// ---------------------------------------------------------------------------
+
+const SIMPLE_SCHEMA = {
+  type: "object",
+  properties: { x: { type: "string", description: "an arg" } },
+  required: ["x"],
+};
+
+function tool(name: string, annotations?: Record<string, unknown>): ToolSummary {
+  return { name, description: "a tool", inputSchema: SIMPLE_SCHEMA, annotations };
+}
+
+/** A fake connection — never dereferenced because we always pass options.call. */
+const FAKE_CONN = {} as unknown as Connection;
+
+/** A call function that records which tools were invoked and returns ok. */
+function recordingCall(): { call: CallFn; calledTools: () => Set<string> } {
+  const seen = new Set<string>();
+  const call: CallFn = async (name) => {
+    seen.add(name);
+    return { ok: true, isError: false, content: [], latencyMs: 1 };
+  };
+  return { call, calledTools: () => seen };
+}
+
+describe("isDestructive", () => {
+  it("is true only when annotations.destructiveHint === true", () => {
+    expect(isDestructive(tool("a", { destructiveHint: true }))).toBe(true);
+    expect(isDestructive(tool("b", { destructiveHint: false }))).toBe(false);
+    expect(isDestructive(tool("c", { readOnlyHint: true }))).toBe(false);
+    expect(isDestructive(tool("d"))).toBe(false);
+  });
+});
+
+describe("runFuzz — dry-run + coverage", () => {
+  it("skips destructive tools by default and records them in coverage", async () => {
+    const rec = recordingCall();
+    const { results, coverage } = await runFuzz(
+      FAKE_CONN,
+      [tool("safe"), tool("danger", { destructiveHint: true })],
+      { call: rec.call }
+    );
+    expect(rec.calledTools().has("safe")).toBe(true);
+    expect(rec.calledTools().has("danger")).toBe(false);
+    expect(coverage.totalTools).toBe(2);
+    expect(coverage.fuzzedTools).toBe(1);
+    expect(coverage.skippedDestructive).toEqual(["danger"]);
+    expect(coverage.skippedOverCap).toEqual([]);
+    expect(results.every((r) => r.name === "safe")).toBe(true);
+  });
+
+  it("fuzzes destructive tools when fuzzDestructive is true", async () => {
+    const rec = recordingCall();
+    const { coverage } = await runFuzz(
+      FAKE_CONN,
+      [tool("safe"), tool("danger", { destructiveHint: true })],
+      { call: rec.call, fuzzDestructive: true }
+    );
+    expect(rec.calledTools().has("danger")).toBe(true);
+    expect(coverage.fuzzedTools).toBe(2);
+    expect(coverage.skippedDestructive).toEqual([]);
+  });
+
+  it("applies the maxTools cap to eligible tools and records the overflow", async () => {
+    const rec = recordingCall();
+    const { coverage } = await runFuzz(
+      FAKE_CONN,
+      [tool("a"), tool("b"), tool("c")],
+      { call: rec.call, maxTools: 2 }
+    );
+    expect(coverage.fuzzedTools).toBe(2);
+    expect(coverage.skippedOverCap).toEqual(["c"]);
+    expect(rec.calledTools().has("c")).toBe(false);
+  });
+
+  it("reports zero fuzzed tools when every tool is destructive (no opt-in)", async () => {
+    const rec = recordingCall();
+    const { results, coverage } = await runFuzz(
+      FAKE_CONN,
+      [tool("d1", { destructiveHint: true }), tool("d2", { destructiveHint: true })],
+      { call: rec.call }
+    );
+    expect(results).toHaveLength(0);
+    expect(coverage.fuzzedTools).toBe(0);
+    expect(coverage.skippedDestructive).toEqual(["d1", "d2"]);
   });
 });

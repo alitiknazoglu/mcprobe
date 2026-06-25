@@ -125,6 +125,20 @@ try {
     }
   }
 
+  // (3b) Coverage is present when fuzz ran, and accounts for every tool.
+  const cov = payload.coverage;
+  if (!cov || typeof cov.totalTools !== "number" || typeof cov.fuzzedTools !== "number") {
+    fail(`payload.coverage missing or malformed: ${JSON.stringify(cov)}`);
+  }
+  if (!Array.isArray(cov.skippedDestructive) || !Array.isArray(cov.skippedOverCap)) {
+    fail(`coverage skip lists must be arrays: ${JSON.stringify(cov)}`);
+  }
+  if (cov.fuzzedTools + cov.skippedDestructive.length + cov.skippedOverCap.length !== cov.totalTools) {
+    fail(
+      `coverage does not account for every tool: ${cov.fuzzedTools} + ${cov.skippedDestructive.length} + ${cov.skippedOverCap.length} != ${cov.totalTools}`
+    );
+  }
+
   // (4) Markdown is the headline payload — assert it contains every
   //     required section from the spec.
   const md = typeof payload.markdown === "string" ? payload.markdown : "";
@@ -171,6 +185,16 @@ try {
     fail(
       `grade (${gradeMatch[1]}) doesn't match the spec's thresholds for overall=${mdOverall} (expected ${expectedGradeFromOverall})`
     );
+  }
+
+  // (4b.iii) Critical-issues callout. We ran fuzz, so the header must carry
+  //          either a "⚠ Critical" flag or an all-clear line. The demo's
+  //          flawed tools silently accept input, so it must be the flag.
+  if (!/\*\*⚠ Critical:\*\*/.test(md) && !/✓ No critical behavioral issues/.test(md)) {
+    fail(`markdown missing the critical-issues callout line. First 400 chars:\n${md.slice(0, 400)}`);
+  }
+  if (!/silently accept malformed input/.test(md)) {
+    fail(`demo report should flag tools that silently accept input. Header:\n${md.slice(0, 400)}`);
   }
 
   // (4c) Four per-dimension sections, each with a "X / 10" score and

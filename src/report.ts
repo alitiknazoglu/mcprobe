@@ -8,7 +8,12 @@
 // state. That makes it trivial to unit-test and guarantees the
 // output is stable across runs.
 
-import type { ConformanceReport, Finding } from "./types.js";
+import type {
+  ConformanceReport,
+  Finding,
+  FuzzCoverage,
+  FuzzResult,
+} from "./types.js";
 
 const FINDING_SEVERITY_ORDER: Record<string, number> = {
   error: 0,
@@ -52,7 +57,58 @@ function renderHeader(report: ConformanceReport): string {
 
   lines.push(`**Overall score:** ${report.overall} / 100`);
   lines.push(`**Grade:** ${report.grade}`);
+  if (report.coverage) {
+    lines.push(renderCoverageLine(report.coverage));
+  }
+  // A flag (not a second score): the dangerous behavioral findings hoisted
+  // to the top. Only shown when fuzz cases actually ran.
+  if (report.fuzz.length > 0) {
+    lines.push(renderCriticalLine(report.fuzz));
+  }
   return lines.join("\n");
+}
+
+/** A one-line fuzz coverage summary for the report header. Shown only when
+ *  fuzzing ran, so the behavioral score's coverage is explicit. */
+function renderCoverageLine(c: FuzzCoverage): string {
+  const parts = [`fuzzed ${c.fuzzedTools} of ${c.totalTools} tool(s)`];
+  if (c.skippedDestructive.length > 0) {
+    parts.push(
+      `${c.skippedDestructive.length} skipped as destructive (${c.skippedDestructive.join(", ")})`
+    );
+  }
+  if (c.skippedOverCap.length > 0) {
+    parts.push(`${c.skippedOverCap.length} skipped over the maxTools cap`);
+  }
+  return `**Coverage:** ${parts.join("; ")}`;
+}
+
+/** A critical-issues callout: the silently-accepted and crashing behaviors,
+ *  summarized in one line so they're visible above the fold. This is a flag,
+ *  not a score — the normalized scores are unchanged. */
+function renderCriticalLine(fuzz: FuzzResult[]): string {
+  const silentTools = new Set(
+    fuzz.filter((r) => r.silentlyAccepted).map((r) => r.name)
+  );
+  const crashes = fuzz.filter((r) => r.outcome === "protocolCrash").length;
+
+  if (silentTools.size === 0 && crashes === 0) {
+    return "**✓ No critical behavioral issues** — no silent accepts or protocol crashes";
+  }
+
+  const parts: string[] = [];
+  if (silentTools.size > 0) {
+    // List the offending tools when there are only a few; otherwise the count.
+    const names =
+      silentTools.size <= 4 ? ` (${[...silentTools].join(", ")})` : "";
+    parts.push(
+      `${silentTools.size} tool(s) silently accept malformed input${names}`
+    );
+  }
+  if (crashes > 0) {
+    parts.push(`${crashes} protocol crash(es)`);
+  }
+  return `**⚠ Critical:** ${parts.join("; ")}`;
 }
 
 function renderDimensions(report: ConformanceReport): string {

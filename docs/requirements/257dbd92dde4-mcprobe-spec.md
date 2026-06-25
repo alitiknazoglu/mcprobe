@@ -59,7 +59,8 @@ The probe is a stdio MCP server exposing these tools. The **four core tools are 
 3. **`probe_fuzz`** — behavioral audit, the headline feature (⚠️ actually calls the target's tools).
    - For each tool, generate one valid input and several malformed ones (missing required field, wrong type, out-of-enum) from the schema, then call the tool.
    - Record per case: ok / tool-error (graceful) / protocol-crash, plus whether a malformed input was **silently accepted**, and latency in ms.
-   - Optional `maxTools` cap (default 10) to bound runtime and side effects.
+   - **Dry-run safety:** by default, skip tools annotated `destructiveHint: true` (opt in with `fuzzDestructive: true`). Apply the `maxTools` cap (default 10) to the remaining eligible tools.
+   - Return a **coverage** summary: total tools, tools fuzzed, tools skipped as destructive, tools skipped over the cap.
 
 4. **`probe_report`** — full audit + score.
    - Runs introspect + lint, and (if `fuzz: true`) fuzz, then produces a scored report (see §7).
@@ -121,16 +122,18 @@ Each produces a finding with a stable code:
 
 ## 7. Scoring model
 
-Four dimensions, each scored out of 10, rolled into an overall 0–100. Scoring is **subtractive and transparent**: each dimension starts at full marks and loses points only for concrete, observed problems, with reasons listed in the report.
+Four dimensions, each scored out of 10, rolled into an overall 0–100. The two **static** dimensions are subtractive (start at full marks, lose points per finding). The two **behavioral** dimensions are **normalized rates** so scores compare across servers of different sizes, and they partition the fuzz cases by kind so no outcome is counted twice. Reasons are listed in the report.
 
 | Dimension | Measures |
 | --- | --- |
 | Metadata & Documentation | Server reported a name, version, and `instructions`? |
 | Schema Quality | Count + severity of lint findings across tools. |
-| Error Handling | On invalid input: rejected gracefully (good), silently accepted (bad), or crashed the call (worst). Behavioral — only measured when fuzz runs. |
-| Liveness & Performance | Valid calls succeed without protocol errors; call latency p50/max. Behavioral — only measured when fuzz runs. |
+| Error Handling | Rate over **malformed** cases: `10 × (gracefully rejected / total malformed)`. Silent accepts and protocol crashes both count as failed rejections. Behavioral — only measured when fuzz runs. |
+| Liveness & Performance | Rate over **valid** cases: `10 × (successful / total valid)`, minus a latency penalty (0.5 per 100ms over a 200ms p50 target). Behavioral — only measured when fuzz runs. |
 
 **Measured-only scoring:** the overall score is the average of the dimensions actually evaluated. A static audit (no fuzz) is graded purely on Metadata + Schema Quality; the two behavioral dimensions are reported as "not measured" and excluded from the total rather than penalized with a fake value. (This is what lets a clean server — including MCProbe auditing itself — score 100/100 on a static audit.)
+
+**Report header (when fuzz ran):** in addition to the score and grade, the header carries a **Coverage** line (tools fuzzed vs skipped) and a **critical-issues callout** — a flag, not a second score, summarizing silent-accepting tools and protocol crashes so the dangerous findings sit above the fold (`⚠ Critical: …`, or `✓ No critical behavioral issues`).
 
 Grades: **A** ≥90, **B** ≥75, **C** ≥60, **D** ≥40, **F** <40.
 
@@ -154,7 +157,7 @@ Grades: **A** ≥90, **B** ≥75, **C** ≥60, **D** ≥40, **F** <40.
 - `set_mode` — enum parameter with no description, thin tool description.
 - `well_behaved` — the control: fully documented and validates its input, returning a graceful error on bad input.
 
-**(b) A smoke / dogfood script** that connects the probe to this demo and prints connect → lint → report. Expected result: the flawed tools are flagged, `divide`/`greet` show as *silently accepted*, `well_behaved` correctly rejects bad input, overall grade ≈ B (75/100).
+**(b) A smoke / dogfood script** that connects the probe to this demo and prints connect → lint → report. Expected result: the flawed tools are flagged, `divide`/`greet` show as *silently accepted*, `well_behaved` correctly rejects bad input, overall grade C (low 70s).
 
 **(c) Self-audit (dogfooding):** MCProbe must be able to probe **itself** (launch a second instance of `dist/index.js` as the target) and score itself an **A**. This is both a test and a demo talking point: "an MCP server that audits MCP servers — including itself."
 

@@ -225,7 +225,7 @@ server.tool(
 // the fuzzer exists to surface.
 server.tool(
   "probe_fuzz",
-  "Generate one valid and several malformed inputs per target tool, call each, and record the outcome (ok, toolError, protocolCrash), whether malformed inputs were silently accepted, and call latency.",
+  "Generate one valid and several malformed inputs per target tool, call each, and record the outcome (ok, toolError, protocolCrash), whether malformed inputs were silently accepted, and call latency. Tools annotated destructiveHint:true are skipped by default (set fuzzDestructive to include them). Returns a coverage summary of which tools were fuzzed vs skipped.",
   {
     connectionId: z
       .string()
@@ -237,6 +237,12 @@ server.tool(
       .positive()
       .optional()
       .describe("Cap on the number of tools to fuzz. Defaults to 10."),
+    fuzzDestructive: z
+      .boolean()
+      .optional()
+      .describe(
+        "Also fuzz tools annotated destructiveHint:true. Default false (the dry-run safety guard) so fuzzing an untrusted target can't trigger a destructive action."
+      ),
   },
   // Invokes the target's tools with malformed inputs — has side effects.
   { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
@@ -244,13 +250,15 @@ server.tool(
     const tool = "probe_fuzz";
     try {
       const conn = getRegistry().get(args.connectionId);
-      const results = await runFuzz(conn, conn.tools, {
+      const { results, coverage } = await runFuzz(conn, conn.tools, {
         maxTools: args.maxTools,
+        fuzzDestructive: args.fuzzDestructive,
       });
       return ok({
         connectionId: conn.id,
         server: { name: conn.serverInfo.name, version: conn.serverInfo.version },
         results,
+        coverage,
         summary: summarizeFuzz(results),
       });
     } catch (err) {
@@ -285,6 +293,12 @@ server.tool(
       .positive()
       .optional()
       .describe("Forwarded to probe_fuzz when fuzz=true. Defaults to 10."),
+    fuzzDestructive: z
+      .boolean()
+      .optional()
+      .describe(
+        "Forwarded to probe_fuzz when fuzz=true. Also fuzz tools annotated destructiveHint:true (default false — the dry-run safety guard)."
+      ),
   },
   // Lints always; also fuzzes the target's tools when fuzz=true.
   { readOnlyHint: false, openWorldHint: true },
@@ -298,9 +312,13 @@ server.tool(
       const findings = lintTools(conn.tools, toolsCapability);
 
       const fuzzEnabled = args.fuzz === true;
-      const fuzzResults = fuzzEnabled
-        ? await runFuzz(conn, conn.tools, { maxTools: args.maxTools })
-        : [];
+      const fuzzRun = fuzzEnabled
+        ? await runFuzz(conn, conn.tools, {
+            maxTools: args.maxTools,
+            fuzzDestructive: args.fuzzDestructive,
+          })
+        : undefined;
+      const fuzzResults = fuzzRun?.results ?? [];
 
       const report = buildReport(
         {
@@ -311,7 +329,7 @@ server.tool(
         conn.capabilities,
         findings,
         fuzzResults,
-        { fuzzMeasured: fuzzEnabled }
+        { fuzzMeasured: fuzzEnabled, coverage: fuzzRun?.coverage }
       );
 
       const markdown = renderReport(report);
@@ -321,6 +339,7 @@ server.tool(
         overall: report.overall,
         grade: report.grade,
         dimensions: report.dimensions,
+        coverage: fuzzRun?.coverage,
         findings,
         fuzz: fuzzResults,
         fuzzSummary: summarizeFuzz(fuzzResults),

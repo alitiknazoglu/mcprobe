@@ -6,15 +6,17 @@ This transcript is the AC-7 **generality proof**: MCProbe (built from this repo)
 **Target binary:** `mcp-server-filesystem`
 **Allowed directory:** `/tmp/mcp-fs-allowed`
 **Target version:** 0.2.0
-**Audit timestamp (UTC):** 2026-06-14T11:25:39.611Z
+**Audit timestamp (UTC):** 2026-06-25T17:58:49.048Z
 **Target capabilities:** tools
 **Tool count:** 14 tool(s), 0 resource(s), 0 prompt(s)
 
 # MCProbe conformance report
 
 **Server:** `secure-filesystem-server` 0.2.0
-**Overall score:** 28 / 100
-**Grade:** F
+**Overall score:** 53 / 100
+**Grade:** D
+**Coverage:** fuzzed 10 of 14 tool(s); 2 skipped as destructive (write_file, edit_file); 2 skipped over the maxTools cap
+**✓ No critical behavioral issues** — no silent accepts or protocol crashes
 
 ## Dimensions
 
@@ -27,13 +29,13 @@ This transcript is the AC-7 **generality proof**: MCProbe (built from this repo)
 - deducted 9.00 from 18 finding(s): 0 error, 18 warning, 0 info
 -   param.missing_description: 18
 
-### Error Handling: 0 / 10
-- 10 valid case(s) returned a tool error (the tool is broken on good input)
-- deducted 10 from 10 behavioral event(s) across 52 case(s)
+### Error Handling: 10 / 10
+- 42/42 malformed input(s) rejected with a clean tool error (100%)
+- every malformed input was rejected gracefully
 
 ### Liveness & Performance: 0 / 10
-- no valid-call latencies were collected
-- 10 valid call(s) returned a tool error
+- 0/10 valid call(s) succeeded (0%)
+- 10 valid call(s) failed on good input (tool error or protocol crash)
 
 ## Findings summary
 
@@ -62,62 +64,62 @@ This transcript is the AC-7 **generality proof**: MCProbe (built from this repo)
 
 | Tool | Case | Outcome | Silent | Latency (ms) | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `read_file` | `valid` | toolError | no | 7 | Access denied - path outside allowed directories: /home/har… |
-| `read_file` | `missing_required:path` | toolError | no | 2 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_file` | `wrong_type:path` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_file` | `wrong_type:tail` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_file` | `wrong_type:head` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_file` | `extra_garbage` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `read_text_file` | `valid` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `read_text_file` | `missing_required:path` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_text_file` | `wrong_type:path` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_text_file` | `wrong_type:tail` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_file` | `valid` | toolError | no | 2 | Access denied - path outside allowed directories: /Users/pr… |
+| `read_file` | `missing_required:path` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_file` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_file` | `wrong_type:tail` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_file` | `wrong_type:head` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_file` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `read_text_file` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `read_text_file` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_text_file` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_text_file` | `wrong_type:tail` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `read_text_file` | `wrong_type:head` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_text_file` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /home/har… |
-| `read_media_file` | `valid` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
+| `read_text_file` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `read_media_file` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
 | `read_media_file` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `read_media_file` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_media_file` | `extra_garbage` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `read_multiple_files` | `valid` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `read_multiple_files` | `missing_required:paths` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_media_file` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `read_multiple_files` | `valid` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `read_multiple_files` | `missing_required:paths` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
 | `read_multiple_files` | `wrong_type:paths` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `read_multiple_files` | `extra_garbage` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `write_file` | `valid` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `write_file` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `write_file` | `missing_required:content` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `write_file` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `write_file` | `wrong_type:content` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `write_file` | `extra_garbage` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `edit_file` | `valid` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `edit_file` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `edit_file` | `missing_required:edits` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `edit_file` | `wrong_type:path` | toolError | no | 3 | MCP error -32602: Input validation error: Invalid arguments… |
-| `edit_file` | `wrong_type:edits` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `edit_file` | `wrong_type:dryRun` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `edit_file` | `extra_garbage` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `create_directory` | `valid` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `create_directory` | `missing_required:path` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
+| `create_directory` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `create_directory` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `create_directory` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `create_directory` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /home/har… |
-| `list_directory` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /home/har… |
+| `create_directory` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `list_directory` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
 | `list_directory` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `list_directory` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `list_directory` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /home/har… |
-| `list_directory_with_sizes` | `valid` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
+| `list_directory` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `list_directory_with_sizes` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
 | `list_directory_with_sizes` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `list_directory_with_sizes` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `list_directory_with_sizes` | `wrong_type:sortBy` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `list_directory_with_sizes` | `out_of_enum:sortBy` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `list_directory_with_sizes` | `extra_garbage` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
-| `directory_tree` | `valid` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
+| `list_directory_with_sizes` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `directory_tree` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
 | `directory_tree` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `directory_tree` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `directory_tree` | `wrong_type:excludePatterns` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `directory_tree` | `extra_garbage` | toolError | no | 1 | Access denied - path outside allowed directories: /home/har… |
+| `directory_tree` | `wrong_type:excludePatterns` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `directory_tree` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `move_file` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `move_file` | `missing_required:source` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `move_file` | `missing_required:destination` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `move_file` | `wrong_type:source` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `move_file` | `wrong_type:destination` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `move_file` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `search_files` | `valid` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
+| `search_files` | `missing_required:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `search_files` | `missing_required:pattern` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `search_files` | `wrong_type:path` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `search_files` | `wrong_type:pattern` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `search_files` | `wrong_type:excludePatterns` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `search_files` | `extra_garbage` | toolError | no | 0 | Access denied - path outside allowed directories: /Users/pr… |
 
 ---
 
-**Audit summary:** overall 28/100, grade **F**, 18 lint finding(s), 52 fuzz case(s).
+**Audit summary:** overall 53/100, grade **D**, 18 lint finding(s), 52 fuzz case(s).
 
 **Per-dimension scores (out of 10):**
 
@@ -125,7 +127,7 @@ This transcript is the AC-7 **generality proof**: MCProbe (built from this repo)
 | --- | --- |
 | Metadata & Documentation | 10 / 10 |
 | Schema Quality | 1 / 10 |
-| Error Handling | 0 / 10 |
+| Error Handling | 10 / 10 |
 | Liveness & Performance | 0 / 10 |
 
-*Generated by MCProbe on 2026-06-14T11:25:39.611Z.*
+*Generated by MCProbe on 2026-06-25T17:58:49.048Z.*

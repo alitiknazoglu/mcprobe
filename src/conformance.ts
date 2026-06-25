@@ -17,6 +17,7 @@ import type {
   ConformanceReport,
   DimensionScore,
   Finding,
+  FuzzCoverage,
   FuzzResult,
   Grade,
 } from "./types.js";
@@ -105,83 +106,103 @@ export function scoreSchemaQuality(findings: Finding[]): DimensionScore {
   return clampDim("schemaQuality", "Schema Quality", score, reasons);
 }
 
-/** Start at 10; subtract 2 per silentlyAccepted malformed case, 4 per
- *  protocolCrash, 1 per toolError on a valid case. Clamp. */
+/** Error Handling = how well the server *rejects* bad input, scored as a
+ *  rate so it's comparable across servers of different sizes. We look only
+ *  at malformed cases (everything except the one "valid" case per tool). A
+ *  graceful tool error is a correct rejection (full credit); a silent
+ *  accept (garbage let through) or a protocol crash (errored at the wire
+ *  instead of rejecting cleanly) are both failures (no credit).
+ *
+ *  score = 10 × (gracefully-rejected malformed cases / total malformed). */
 export function scoreErrorHandling(fuzzResults: FuzzResult[]): DimensionScore {
   const reasons: string[] = [];
 
+  const malformed = fuzzResults.filter((r) => r.case !== "valid");
+  let graceful = 0;
   let silent = 0;
   let crashes = 0;
-  let validToolErrors = 0;
-
-  for (const r of fuzzResults) {
+  for (const r of malformed) {
     if (r.silentlyAccepted) silent += 1;
-    if (r.outcome === "protocolCrash") crashes += 1;
-    if (r.case === "valid" && r.outcome === "toolError") {
-      validToolErrors += 1;
-    }
+    else if (r.outcome === "protocolCrash") crashes += 1;
+    else if (r.outcome === "toolError") graceful += 1;
   }
 
-  const deduction = silent * 2 + crashes * 4 + validToolErrors * 1;
-  let score = 10 - deduction;
-
-  if (fuzzResults.length === 0) {
-    reasons.push("no fuzz cases ran (empty result set)");
+  let score: number;
+  if (malformed.length === 0) {
+    score = 10;
+    reasons.push("no malformed cases were generated for the fuzzed tools");
   } else {
+    const rate = graceful / malformed.length;
+    score = 10 * rate;
+    reasons.push(
+      `${graceful}/${malformed.length} malformed input(s) rejected with a clean tool error (${(rate * 100).toFixed(0)}%)`
+    );
     if (silent > 0) {
       reasons.push(
-        `${silent} malformed case(s) were silently accepted (no tool error, no rejection)`
+        `${silent} malformed case(s) silently accepted — the tool let bad input through`
       );
     }
     if (crashes > 0) {
-      reasons.push(`${crashes} call(s) crashed the protocol`);
-    }
-    if (validToolErrors > 0) {
       reasons.push(
-        `${validToolErrors} valid case(s) returned a tool error (the tool is broken on good input)`
+        `${crashes} malformed case(s) crashed the protocol instead of rejecting gracefully`
       );
     }
-    if (silent === 0 && crashes === 0 && validToolErrors === 0) {
-      reasons.push(
-        "every fuzz case behaved correctly (graceful on bad input, clean on valid input)"
-      );
+    if (silent === 0 && crashes === 0) {
+      reasons.push("every malformed input was rejected gracefully");
     }
-    reasons.push(
-      `deducted ${deduction} from ${silent + crashes + validToolErrors} behavioral event(s) across ${fuzzResults.length} case(s)`
-    );
   }
 
   return clampDim("errorHandling", "Error Handling", score, reasons);
 }
 
-/** Start at 10; subtract 4 per protocolCrash on a valid call, 1 per
- *  toolError on a valid call, 0.5 per 100ms above a 200ms p50 target
- *  (rounded). The latency penalty uses the p50 of the *valid* calls
- *  — the contract is that the happy path should be fast. */
+/** Liveness & Performance = how well the server *serves* good input,
+ *  scored as a rate so it's comparable across server sizes. We look only
+ *  at the one "valid" case per tool — a valid call that errors or crashes
+ *  is a bug on the happy path. Latency uses the p50 of the successful
+ *  valid calls (the contract is that the happy path should be fast):
+ *  0.5 points per 100ms above a 200ms target.
+ *
+ *  score = 10 × (valid calls that succeeded / valid calls) − latency penalty.
+ *
+ *  Note: valid-case failures are scored here and *only* here; malformed-case
+ *  handling is scored in Error Handling. The two dimensions partition the
+ *  fuzz cases by case kind, so no outcome is counted twice. */
 export function scoreLiveness(fuzzResults: FuzzResult[]): DimensionScore {
   const reasons: string[] = [];
 
-  let validCrashes = 0;
-  let validToolErrors = 0;
-  const validLatencies: number[] = [];
-  let maxLatency = 0;
-
-  for (const r of fuzzResults) {
-    if (r.latencyMs > maxLatency) maxLatency = r.latencyMs;
-    if (r.case === "valid") {
-      if (r.outcome === "protocolCrash") validCrashes += 1;
-      if (r.outcome === "toolError") validToolErrors += 1;
-      if (r.outcome === "ok") validLatencies.push(r.latencyMs);
+  const valid = fuzzResults.filter((r) => r.case === "valid");
+  let ok = 0;
+  let failures = 0;
+  const okLatencies: number[] = [];
+  for (const r of valid) {
+    if (r.outcome === "ok") {
+      ok += 1;
+      okLatencies.push(r.latencyMs);
+    } else {
+      failures += 1;
     }
   }
 
-  let score = 10;
-  score -= validCrashes * 4;
-  score -= validToolErrors * 1;
+  let score: number;
+  if (valid.length === 0) {
+    score = 10;
+    reasons.push("no valid calls were made");
+  } else {
+    const rate = ok / valid.length;
+    score = 10 * rate;
+    reasons.push(
+      `${ok}/${valid.length} valid call(s) succeeded (${(rate * 100).toFixed(0)}%)`
+    );
+    if (failures > 0) {
+      reasons.push(
+        `${failures} valid call(s) failed on good input (tool error or protocol crash)`
+      );
+    }
+  }
 
-  // p50 of valid-call latencies
-  if (validLatencies.length > 0) {
-    const sorted = [...validLatencies].sort((a, b) => a - b);
+  // Latency penalty on the p50 of the successful valid calls.
+  if (okLatencies.length > 0) {
+    const sorted = [...okLatencies].sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
     const lower = sorted[mid - 1];
     const upper = sorted[mid];
@@ -190,9 +211,9 @@ export function scoreLiveness(fuzzResults: FuzzResult[]): DimensionScore {
         ? (lower + upper) / 2
         : (upper ?? lower ?? 0);
     const target = 200;
+    const maxLatency = sorted[sorted.length - 1] ?? 0;
     if (p50 > target) {
-      const over = p50 - target;
-      const buckets = Math.round(over / 100);
+      const buckets = Math.round((p50 - target) / 100);
       const latencyPenalty = buckets * 0.5;
       score -= latencyPenalty;
       reasons.push(
@@ -204,20 +225,8 @@ export function scoreLiveness(fuzzResults: FuzzResult[]): DimensionScore {
       );
     }
     reasons.push(
-      `valid-call latency max = ${maxLatency.toFixed(0)}ms across ${validLatencies.length} call(s)`
+      `valid-call latency max = ${maxLatency.toFixed(0)}ms across ${okLatencies.length} call(s)`
     );
-  } else {
-    reasons.push("no valid-call latencies were collected");
-  }
-
-  if (validCrashes > 0) {
-    reasons.push(`${validCrashes} valid call(s) crashed the protocol`);
-  }
-  if (validToolErrors > 0) {
-    reasons.push(`${validToolErrors} valid call(s) returned a tool error`);
-  }
-  if (validCrashes === 0 && validToolErrors === 0 && validLatencies.length > 0) {
-    reasons.push("every valid call succeeded with no protocol errors");
   }
 
   return clampDim("liveness", "Liveness & Performance", score, reasons);
@@ -273,17 +282,27 @@ export function buildReport(
   capabilities: Record<string, unknown>,
   findings: Finding[],
   fuzz: FuzzResult[],
-  options: { fuzzMeasured: boolean } = { fuzzMeasured: true }
+  options: { fuzzMeasured: boolean; coverage?: FuzzCoverage } = {
+    fuzzMeasured: true,
+  }
 ): ConformanceReport {
   const metadata = scoreMetadata(server, capabilities);
   const schema = scoreSchemaQuality(findings);
 
-  const errorHandling = options.fuzzMeasured
+  // Fuzz may have been requested but produced no cases — e.g. after the
+  // dry-run skip and maxTools cap, no tools were eligible. The behavioral
+  // dimensions can only be measured when at least one case actually ran.
+  const fuzzRan = options.fuzzMeasured && fuzz.length > 0;
+  const behavioralReason = options.fuzzMeasured
+    ? "fuzz ran but no tools were eligible to fuzz (see coverage)"
+    : "not measured — pass `fuzz: true` to evaluate this dimension";
+
+  const errorHandling = fuzzRan
     ? scoreErrorHandling(fuzz)
-    : notMeasured("errorHandling", "Error Handling");
-  const liveness = options.fuzzMeasured
+    : notMeasured("errorHandling", "Error Handling", behavioralReason);
+  const liveness = fuzzRan
     ? scoreLiveness(fuzz)
-    : notMeasured("liveness", "Liveness & Performance");
+    : notMeasured("liveness", "Liveness & Performance", behavioralReason);
 
   const dimensions = [metadata, schema, errorHandling, liveness];
   const { overall, grade } = rollup(dimensions);
@@ -295,6 +314,7 @@ export function buildReport(
     dimensions,
     findings,
     fuzz,
+    coverage: options.coverage,
   };
 }
 
@@ -325,13 +345,14 @@ function clampDim(
  *  rollup; reported in the rendered Markdown as "not measured". */
 function notMeasured(
   key: DimensionScore["key"],
-  label: string
+  label: string,
+  reason = "not measured — pass `fuzz: true` to evaluate this dimension"
 ): DimensionScore {
   return {
     key,
     label,
     score: 0,
-    reasons: ["not measured — pass `fuzz: true` to evaluate this dimension"],
+    reasons: [reason],
     notMeasured: true,
   };
 }

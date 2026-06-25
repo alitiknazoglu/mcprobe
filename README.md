@@ -10,9 +10,11 @@ The behavioral pass is the part that matters. Static schema audits tell you
 that a tool exists and looks reasonable. MCProbe then picks up a phone and
 *dials* each tool with `missing_required`, `wrong_type`, `out_of_enum`, and
 `extra_garbage` inputs — the same mistakes a language model will make on a
-bad day — and classifies the response. A server that says "OK" to garbage is
-graded harshly. A server that crashes the JSON-RPC transport is graded
-harsher. A server that returns a clean `isError: true` is graded correctly.
+bad day — and classifies the response. A server that returns a clean
+`isError: true` rejected the input correctly. A server that says "OK" to
+garbage (silently accepted it) or crashes the JSON-RPC transport both
+*failed to reject it* — and the Error Handling score is the fraction of
+bad inputs the server rejected cleanly.
 
 ## Problem statement
 
@@ -136,8 +138,10 @@ other target.
 
 `fuzz: false` runs a read-only static audit (metadata + schema quality
 only). `fuzz: true` also **calls the target's tools with malformed
-inputs** to score error handling and liveness — only fuzz servers you
-trust or that are read-only.
+inputs** to score error handling and liveness. Tools the target marks
+`destructiveHint: true` are skipped by default (pass `fuzzDestructive:
+true` to include them), so a default fuzz run is safe even against
+servers you don't control.
 
 ## The six `probe_*` tools
 
@@ -149,8 +153,8 @@ cover the everyday ergonomics of managing connections.
 | --- | --- | --- |
 | `probe_connect` | Open a connection to a target. | `{ connectionId, name, version, capabilities, counts, defaultConnectionId }` |
 | `probe_lint` | Run the 12 lint rules over the target's cached tool summaries. | `{ connectionId, server, findings, summary }` |
-| `probe_fuzz` | Generate valid + malformed inputs per tool, call each, classify the outcome. | `{ connectionId, server, results, summary }` |
-| `probe_report` | Run lint (and fuzz when requested), score, render Markdown. | `{ connectionId, server, overall, grade, dimensions, findings, fuzz, markdown }` |
+| `probe_fuzz` | Generate valid + malformed inputs per tool, call each, classify the outcome. Skips destructive tools by default. | `{ connectionId, server, results, coverage, summary }` |
+| `probe_report` | Run lint (and fuzz when requested), score, render Markdown. | `{ connectionId, server, overall, grade, dimensions, coverage, findings, fuzz, markdown }` |
 | `probe_list` | (optional) Enumerate the target's tools. | `{ connectionId, server, tools }` |
 | `probe_disconnect` | (optional) Close one connection (by id) or every connection. | `{ removed, remaining, defaultConnectionId }` |
 
@@ -219,6 +223,13 @@ The classifier assigns one of three outcomes:
 | `toolError` | The target returned a result with `isError: true` (graceful rejection). |
 | `protocolCrash` | The call rejected or the transport closed. |
 
+**Dry-run safety.** By default, tools annotated `destructiveHint: true`
+are **not** fuzzed — so pointing MCProbe at a server you don't control
+can't trigger a real destructive action (e.g. a `delete_file` tool).
+Pass `fuzzDestructive: true` to override. `probe_fuzz` (and the report)
+return a **coverage** summary listing how many tools were fuzzed and
+which were skipped (as destructive, or over the `maxTools` cap).
+
 ### `probe_report`
 
 The convenience entry point. Calls `probe_lint` (always) and
@@ -230,26 +241,39 @@ numbers can pull them out of the structured fields.
 
 ## Scoring model — four dimensions
 
-The scorecard is subtractive. Every dimension starts at 10/10 and
-loses points only for concrete, observed problems. The overall
-0–100 score is the mean of the *measured* dimensions; dimensions
-that were not measured (e.g. the two behavioral ones when
-`fuzz: false`) are reported as "not measured" and excluded from the
-average rather than penalized with a fake value. This is what lets
-a static audit of a clean server still score 100/100.
+The overall 0–100 score is the mean of the *measured* dimensions.
+Dimensions that were not measured (e.g. the two behavioral ones when
+`fuzz: false`, or when every tool was skipped) are reported as "not
+measured" and excluded from the average rather than penalized with a
+fake value. This is what lets a static audit of a clean server still
+score 100/100.
+
+The two **static** dimensions are subtractive (start at 10, lose points
+per finding). The two **behavioral** dimensions are **normalized rates**,
+so a score is comparable across servers of different sizes — and the
+fuzz cases are partitioned by kind (malformed → Error Handling, valid →
+Liveness) so no outcome is ever counted twice.
 
 Letter grades: A ≥ 90, B ≥ 75, C ≥ 60, D ≥ 40, F < 40.
 
 | Dimension | Always measured? | What it captures |
 | --- | --- | --- |
 | **Metadata & Documentation** | yes | Server identity (name, version), advertised capabilities, presence of `instructions` (+1 bonus). |
-| **Schema Quality** | yes | Deducted 1 per `error`, 0.5 per `warning`, 0.25 per `info` finding. |
-| **Error Handling** | only with `fuzz: true` | Deducted 2 per `silentlyAccepted` malformed case, 4 per `protocolCrash`, 1 per `toolError` on a valid case. |
-| **Liveness & Performance** | only with `fuzz: true` | Deducted 4 per `protocolCrash` on a valid call, 1 per `toolError` on a valid call, 0.5 per 100ms over a 200ms p50 target. |
+| **Schema Quality** | yes | Subtractive: 1 per `error`, 0.5 per `warning`, 0.25 per `info` finding. |
+| **Error Handling** | only with `fuzz: true` | Rate over **malformed** cases: `10 × (gracefully-rejected / total malformed)`. A silent accept (garbage let through) or a protocol crash both count as failed rejections. |
+| **Liveness & Performance** | only with `fuzz: true` | Rate over **valid** cases: `10 × (successful / total valid)`, minus 0.5 per 100ms that the valid-call p50 latency exceeds a 200ms target. |
 
-The full deduction list and the top-offender breakdown for each
-dimension are emitted in the Markdown report so the score is
-auditable by a human.
+The per-dimension reasons and counts are emitted in the Markdown report
+so the score is auditable by a human. When fuzzing runs, the report
+header also shows two extra lines:
+
+- a **Coverage** line (how many tools were fuzzed, and which were skipped
+  as destructive or over the `maxTools` cap); and
+- a **critical-issues callout** — a flag, *not* a second score — hoisting
+  the dangerous findings to the top, e.g. `⚠ Critical: 4 tool(s) silently
+  accept malformed input (…); 1 protocol crash(es)`, or `✓ No critical
+  behavioral issues` when there are none. The normalized scores are
+  unchanged; this just makes the scary stuff visible above the fold.
 
 ## 30-second demo
 
@@ -387,9 +411,15 @@ that proves the build artifact loads over the real protocol.
   attempt to discover server-side bugs that are out of band of
   the tool contract. The point of MCProbe is conformance, not
   general-purpose server fuzzing.
-- **The scoring is subtractive and dimension-local.** A perfect
-  score on one dimension does not rescue a failure on another.
-  The four dimensions are weighted equally when measured.
+- **The scoring is dimension-local.** A perfect score on one dimension
+  does not rescue a failure on another. The static dimensions are
+  subtractive; the behavioral dimensions are normalized rates. The four
+  dimensions are weighted equally when measured.
+- **Dry-run skips destructive tools.** By default a fuzz run does not
+  exercise tools annotated `destructiveHint: true`; they show up in the
+  coverage summary as skipped. A target that *doesn't* annotate a
+  destructive tool will still be fuzzed — annotations are the only
+  signal MCProbe has. Pass `fuzzDestructive: true` to fuzz everything.
 - **Behavioral scores need a real protocol round-trip.** When
   `fuzz: false` is passed to `probe_report`, the `Error Handling`
   and `Liveness & Performance` dimensions are reported as

@@ -51,15 +51,18 @@ result (the `markdown` field of the structured `ConformanceReport`):
 # MCProbe conformance report
 
 **Server:** `some-server` 1.0.0
-**Overall score:** 64 / 100
+**Overall score:** 73 / 100
 **Grade:** C
+**Coverage:** fuzzed 4 of 4 tool(s)
+**⚠ Critical:** 3 tool(s) silently accept malformed input (greet, divide, set_mode)
 
 ## Dimensions
 ### Metadata & Documentation: 10 / 10
 ### Schema Quality: 3.5 / 10
 - deducted for missing descriptions, untyped params, and no annotations
-### Error Handling: 2 / 10
-- 3 malformed inputs were silently accepted (no isError) across the tools
+### Error Handling: 5.56 / 10
+- 5/9 malformed input(s) rejected with a clean tool error (56%)
+- 4 malformed case(s) silently accepted — the tool let bad input through
 ### Liveness & Performance: 10 / 10
 
 ## Findings summary
@@ -82,12 +85,13 @@ result (the `markdown` field of the structured `ConformanceReport`):
 
 ### 4. The agent answers the user
 
-> It scored **64/100 (C)**. The schemas have gaps (missing descriptions,
+> It scored **73/100 (C)**. The schemas have gaps (missing descriptions,
 > untyped parameters, no annotations), and — more importantly — under fuzzing
-> several tools **silently accepted malformed input** instead of returning an
-> error (Error Handling 2/10). I'd hold off on wiring it into an autonomous
-> workflow until those are fixed, since your agent could feed it bad arguments
-> and get back plausible-looking garbage rather than a clear failure.
+> only about half its malformed inputs were rejected cleanly: several tools
+> **silently accepted bad input** instead of returning an error (Error
+> Handling 5.56/10). I'd hold off on wiring it into an autonomous workflow
+> until those are fixed, since your agent could feed it bad arguments and get
+> back plausible-looking garbage rather than a clear failure.
 
 ---
 
@@ -95,11 +99,13 @@ result (the `markdown` field of the structured `ConformanceReport`):
 
 - **`fuzz: false`** runs a read-only static audit (metadata + schema quality
   only) — no calls to the target, safe against any server.
-- **`fuzz: true`** invokes the target's tools with malformed inputs; only fuzz
-  servers you trust or that are read-only. MCProbe's own `probe_fuzz` /
-  `probe_report` tools are annotated `openWorldHint: true` (and `probe_fuzz`
-  `destructiveHint: true`) so a host can warn before running them.
+- **`fuzz: true`** invokes the target's tools with malformed inputs, but by
+  default it **skips tools the target marks `destructiveHint: true`** (the
+  dry-run guard), so a default fuzz run is safe even against servers you
+  don't control. Pass `fuzzDestructive: true` to fuzz everything. The report
+  includes a **coverage** summary of which tools were fuzzed vs skipped.
 - Every tool returns both a human-readable text block **and** a structured
   payload (`structuredContent`), so an agent can either read the Markdown or
-  pull the numbers out of `overall`, `grade`, `dimensions`, and `findings`.
+  pull the numbers out of `overall`, `grade`, `dimensions`, `coverage`, and
+  `findings`.
 - Omit `connectionId` to act on the most recently opened connection.
