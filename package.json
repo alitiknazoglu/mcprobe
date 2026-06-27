@@ -14,11 +14,19 @@
     "claude.md",
     "LICENSE"
   ],
+  "exports": {
+    "./audit": {
+      "types": "./dist/audit.d.ts",
+      "default": "./dist/audit.js"
+    },
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p examples/demo-target/tsconfig.json",
     "build:probe": "tsc -p tsconfig.json",
     "build:demo": "tsc -p examples/demo-target/tsconfig.json",
     "start": "node dist/index.js",
+    "prepare": "npm run build:probe",
     "pretest": "npm run build",
     "test": "vitest run"
   },

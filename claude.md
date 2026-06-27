@@ -50,7 +50,8 @@ mcprobe/
 │   ├── fuzz.ts           # JSON-Schema -> valid + malformed cases
 │   ├── conformance.ts    # orchestrator + 4-dimension scoring
 │   ├── report.ts         # pure Markdown renderer
-│   └── index.ts          # McpServer, registers probe_* tools
+│   ├── index.ts          # McpServer, registers probe_* tools
+│   └── audit.ts          # library entry: auditUrl() + softenReport() (embed in another app)
 ├── examples/
 │   ├── demo-target/      # sibling package, four flawed tools
 │   │   ├── package.json
@@ -70,7 +71,8 @@ mcprobe/
 │   ├── fuzz.test.ts         # generator, classifier, summarizer, dry-run + coverage
 │   ├── conformance.test.ts  # normalized scoring + no-overlap + coverage rendering
 │   ├── target-client.test.ts # safeList tolerance (introspection never crashes)
-│   └── demo-target.test.ts  # live spawn of examples/demo-target
+│   ├── demo-target.test.ts  # live spawn of examples/demo-target
+│   └── audit.test.ts        # softenReport() free-tier boundary
 └── dist/                 # tsc output for the probe (gitignored; produced by `npm run build`)
     └── examples/demo-target/dist/  # tsc output for the demo target
 ```
@@ -88,6 +90,7 @@ touch the world):
 | `src/report.ts` | yes | none |
 | `src/target-client.ts` | no | spawns / dials MCP transports |
 | `src/index.ts` | no | owns the stdio transport, registers tools |
+| `src/audit.ts` | no | `auditUrl()` dials an http target; `softenReport()` is pure. Library entry for embedding (exported as `mcprobe/audit`). |
 
 ## Naming rules
 

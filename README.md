@@ -346,6 +346,27 @@ repository. The script that produced it is
 probe scoring the first) lives at
 `examples/transcripts/self-audit.md`.
 
+## Use as a library
+
+Besides the MCP server, MCProbe exposes its audit pipeline as a function for
+embedding in your own backend. It audits **HTTP** MCP servers (URL in, report
+out) and never spawns a process:
+
+```ts
+import { auditUrl, softenReport, renderReport } from "mcprobe/audit";
+
+const report = await auditUrl("https://example.com/mcp", { fuzz: false });
+console.log(report.overall, report.grade);  // structured ConformanceReport
+console.log(renderReport(report));          // or the Markdown
+const teaser = softenReport(report);        // a trimmed view (scores, no detail)
+```
+
+`auditUrl` defaults to a static, read-only audit (`fuzz: false`); pass
+`fuzz: true` to also run the behavioral fuzzer (destructive tools are skipped
+unless `fuzzDestructive: true`). `softenReport` is handy for a free/preview
+tier — it keeps the scores and counts but withholds the reasons, full
+findings, fuzz table, and recommended fixes.
+
 ## Architecture
 
 MCProbe plays two roles at once: it is a stdio MCP server to its
