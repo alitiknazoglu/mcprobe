@@ -17,6 +17,10 @@ inputs:
     description: "Fail the job if the 0–100 score is below this. Empty = report only, never fail. (Grades: A≥90, B≥75, C≥60, D≥40.)"
     required: false
     default: ""
+  token:
+    description: "Optional mcprobe.org Pro token (a GitHub secret). When set, the run is ALSO uploaded to your dashboard (runs `push` instead of `audit`). Leave empty for a free, local-only audit."
+    required: false
+    default: ""
 
 outputs:
   score:
@@ -39,6 +43,8 @@ runs:
         MCPROBE_URL: ${{ inputs.url }}
         MCPROBE_FUZZ: ${{ inputs.fuzz }}
         MCPROBE_MIN: ${{ inputs.min-score }}
+        # Read by the CLI directly; when set, we run `push` (upload to dashboard).
+        MCPROBE_TOKEN: ${{ inputs.token }}
       run: |
         set -euo pipefail
 
@@ -48,7 +54,17 @@ runs:
         FUZZ_FLAG=""
         [ "$MCPROBE_FUZZ" = "true" ] && FUZZ_FLAG="--fuzz"
 
-        node "$GITHUB_ACTION_PATH/dist/index.js" audit "$MCPROBE_URL" $FUZZ_FLAG --json > mcprobe-report.json
+        # Pro path: a token means `push` (audits AND uploads to mcprobe.org).
+        # Free path: no token means `audit` (local-only). Both emit the same JSON.
+        # The CLI reads the token from MCPROBE_TOKEN, so it never appears on the
+        # command line / in logs.
+        UPLOADED=0
+        if [ -n "$MCPROBE_TOKEN" ]; then
+          node "$GITHUB_ACTION_PATH/dist/index.js" push "$MCPROBE_URL" $FUZZ_FLAG --json > mcprobe-report.json
+          UPLOADED=1
+        else
+          node "$GITHUB_ACTION_PATH/dist/index.js" audit "$MCPROBE_URL" $FUZZ_FLAG --json > mcprobe-report.json
+        fi
 
         SCORE=$(node -e "process.stdout.write(String(require('./mcprobe-report.json').overall))")
         GRADE=$(node -e "process.stdout.write(require('./mcprobe-report.json').grade)")
@@ -66,6 +82,7 @@ runs:
           echo "|------:|:-----:|"
           echo "| $SCORE / 100 | $GRADE |"
           echo ""
+          [ "$UPLOADED" = "1" ] && echo "_Uploaded to your mcprobe.org dashboard._"
           echo "_Machine-readable report written to \`mcprobe-report.json\`._"
         } >> "$GITHUB_STEP_SUMMARY"
 

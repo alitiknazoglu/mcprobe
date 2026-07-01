@@ -178,10 +178,20 @@ The step prints the score to the job summary and exposes `score` / `grade`
 outputs. It also writes a full `mcprobe-report.json` you can upload as an
 artifact. Leave off `min-score` to report without ever failing the build.
 
-> **Want history, PR comments, a "verified" badge and a dashboard?** Add
-> `mcprobe push --token <key>` (see [Hosted version](#hosted-version--mcprobeorg))
-> to upload each run to mcprobe.org — the audit stays free; the hosted tracking
-> is the Pro tier.
+**Upload runs to your dashboard (Pro):** add one line — a `token:` (your
+mcprobe.org Pro key, stored as a GitHub secret). The audit stays the same; the
+run is *also* uploaded to your history/dashboard on mcprobe.org.
+
+```yaml
+      - uses: alitiknazoglu/mcprobe@main
+        with:
+          url: https://your-server.example.com/mcp
+          min-score: "75"
+          token: ${{ secrets.MCPROBE_TOKEN }}   # ← only new line; uploads to your dashboard
+```
+
+The audit itself is always free and local; the hosted tracking (history, gallery,
+badge) is the Pro tier — see [Hosted version](#hosted-version--mcprobeorg).
 
 ## The six `probe_*` tools
 

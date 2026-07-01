@@ -142,7 +142,11 @@ export async function runCli(argv: string[]): Promise<number> {
 
   const data = (await res.json().catch(() => ({}))) as { url?: string };
   process.stderr.write(`✓ uploaded — ${data.url ?? endpoint}\n`);
-  process.stdout.write(`${report.overall}/100 (${report.grade})\n`);
+  // --json emits the full report (parity with `audit --json`); otherwise the
+  // short score line. The "uploaded" note above always goes to stderr.
+  process.stdout.write(
+    (args.json ? JSON.stringify(report, null, 2) : `${report.overall}/100 (${report.grade})`) + "\n"
+  );
   return 0;
 }
 
@@ -165,7 +169,7 @@ Examples:
 Flags:
   --fuzz                also call each tool with malformed input (behavioral test)
   --fuzz-destructive    additionally fuzz tools marked destructive (implies --fuzz)
-  --json                (audit) print the report as JSON instead of Markdown
+  --json                (audit/push) print the report as JSON instead of Markdown
   --stdio "<command>"   audit a local stdio server instead of a URL
   --token <key>         (push) bearer token for the ingest endpoint
   --to <url>            (push) ingest endpoint (default ${DEFAULT_ENDPOINT})
