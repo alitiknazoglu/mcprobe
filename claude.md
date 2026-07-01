@@ -62,7 +62,7 @@ mcprobe/
 ├── README.md             # behavioral pitch first, then tools/scoring/demo
 ├── claude.md             # this file
 ├── action.yml            # composite GitHub Action: `audit`+gate (free) / `push`+upload when a token is given
-├── .claude/skills/       # agent skill (mcp-audit/SKILL.md) — teaches an agent to drive MCProbe
+├── .agents/skills/       # agent skill (mcp-audit/SKILL.md) — teaches an agent to drive MCProbe (.claude/ is gitignored, so ship it here)
 ├── src/
 │   ├── types.ts          # shared types (Finding, FuzzResult, Score, ...)
 │   ├── target-client.ts  # outbound MCP client + ConnectionRegistry
