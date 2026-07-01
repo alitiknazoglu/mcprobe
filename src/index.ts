@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // MCProbe entry point.
 //
 // Owns the McpServer, registers the six probe_* tools (four core + two

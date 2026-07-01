@@ -153,6 +153,36 @@ node dist/index.js push --stdio "npx @acme/my-mcp-server" --fuzz --token mcp_xxx
 The token comes from your mcprobe.org profile; `--to <url>` (or `MCPROBE_API`)
 points it at a different endpoint. Run `mcprobe help` for all flags.
 
+## Audit in CI (GitHub Action)
+
+Gate your MCP server on every push — audit it and fail the build if its
+conformance grade drops. Free and self-contained (it runs the open-source
+engine on your own runner; no account required):
+
+```yaml
+# .github/workflows/mcprobe.yml
+name: MCP audit
+on: [push, pull_request]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: alitiknazoglu/mcprobe@main
+        with:
+          url: https://your-server.example.com/mcp
+          fuzz: true          # behavioral testing (call tools with bad input)
+          min-score: "75"     # fail the job below this (A≥90 B≥75 C≥60 D≥40); omit to report only
+```
+
+The step prints the score to the job summary and exposes `score` / `grade`
+outputs. It also writes a full `mcprobe-report.json` you can upload as an
+artifact. Leave off `min-score` to report without ever failing the build.
+
+> **Want history, PR comments, a "verified" badge and a dashboard?** Add
+> `mcprobe push --token <key>` (see [Hosted version](#hosted-version--mcprobeorg))
+> to upload each run to mcprobe.org — the audit stays free; the hosted tracking
+> is the Pro tier.
+
 ## The six `probe_*` tools
 
 MCProbe registers four core tools and two optional helpers. The core

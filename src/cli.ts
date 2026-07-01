@@ -25,12 +25,13 @@ interface CliArgs {
   stdio?: string;
   fuzz: boolean;
   fuzzDestructive: boolean;
+  json: boolean;
   token?: string;
   to?: string;
 }
 
 function parseArgs(rest: string[]): CliArgs {
-  const out: CliArgs = { fuzz: false, fuzzDestructive: false };
+  const out: CliArgs = { fuzz: false, fuzzDestructive: false, json: false };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === undefined) continue;
@@ -38,7 +39,8 @@ function parseArgs(rest: string[]): CliArgs {
     else if (a === "--fuzz-destructive") {
       out.fuzz = true;
       out.fuzzDestructive = true;
-    } else if (a === "--stdio") out.stdio = rest[++i];
+    } else if (a === "--json") out.json = true;
+    else if (a === "--stdio") out.stdio = rest[++i];
     else if (a === "--token") out.token = rest[++i];
     else if (a === "--to") out.to = rest[++i];
     else if (!a.startsWith("-") && !out.url) out.url = a; // positional URL
@@ -98,7 +100,11 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   if (cmd === "audit") {
-    process.stdout.write(renderReport(report) + "\n");
+    // --json emits the machine-readable report (for CI gating / tooling);
+    // otherwise the human-readable Markdown report.
+    process.stdout.write(
+      (args.json ? JSON.stringify(report, null, 2) : renderReport(report)) + "\n"
+    );
     return 0;
   }
 
@@ -159,6 +165,7 @@ Examples:
 Flags:
   --fuzz                also call each tool with malformed input (behavioral test)
   --fuzz-destructive    additionally fuzz tools marked destructive (implies --fuzz)
+  --json                (audit) print the report as JSON instead of Markdown
   --stdio "<command>"   audit a local stdio server instead of a URL
   --token <key>         (push) bearer token for the ingest endpoint
   --to <url>            (push) ingest endpoint (default ${DEFAULT_ENDPOINT})

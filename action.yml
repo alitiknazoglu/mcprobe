@@ -1,0 +1,77 @@
+name: "MCProbe — MCP conformance audit"
+description: "Audit an MCP server's conformance (schema lint + behavioral fuzzing), score it 0–100, and optionally fail the build below a threshold."
+author: "MCProbe"
+branding:
+  icon: "shield"
+  color: "orange"
+
+inputs:
+  url:
+    description: "HTTP(S) URL of the MCP server to audit."
+    required: true
+  fuzz:
+    description: "Run behavioral fuzzing (call each tool with malformed input). true/false."
+    required: false
+    default: "true"
+  min-score:
+    description: "Fail the job if the 0–100 score is below this. Empty = report only, never fail. (Grades: A≥90, B≥75, C≥60, D≥40.)"
+    required: false
+    default: ""
+
+outputs:
+  score:
+    description: "The 0–100 conformance score."
+    value: ${{ steps.audit.outputs.score }}
+  grade:
+    description: "The A–F letter grade."
+    value: ${{ steps.audit.outputs.grade }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+
+    - id: audit
+      shell: bash
+      env:
+        MCPROBE_URL: ${{ inputs.url }}
+        MCPROBE_FUZZ: ${{ inputs.fuzz }}
+        MCPROBE_MIN: ${{ inputs.min-score }}
+      run: |
+        set -euo pipefail
+
+        # Build the pinned engine (the `prepare` script compiles dist/).
+        ( cd "$GITHUB_ACTION_PATH" && npm ci --no-audit --no-fund >/dev/null 2>&1 )
+
+        FUZZ_FLAG=""
+        [ "$MCPROBE_FUZZ" = "true" ] && FUZZ_FLAG="--fuzz"
+
+        node "$GITHUB_ACTION_PATH/dist/index.js" audit "$MCPROBE_URL" $FUZZ_FLAG --json > mcprobe-report.json
+
+        SCORE=$(node -e "process.stdout.write(String(require('./mcprobe-report.json').overall))")
+        GRADE=$(node -e "process.stdout.write(require('./mcprobe-report.json').grade)")
+        NAME=$(node -e "const r=require('./mcprobe-report.json');process.stdout.write((r.server&&r.server.name)||'MCP server')")
+
+        echo "score=$SCORE" >> "$GITHUB_OUTPUT"
+        echo "grade=$GRADE" >> "$GITHUB_OUTPUT"
+
+        {
+          echo "## 🛡️ MCProbe audit"
+          echo ""
+          echo "**$NAME** — \`$MCPROBE_URL\`"
+          echo ""
+          echo "| Score | Grade |"
+          echo "|------:|:-----:|"
+          echo "| $SCORE / 100 | $GRADE |"
+          echo ""
+          echo "_Machine-readable report written to \`mcprobe-report.json\`._"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        echo "MCProbe: $NAME scored $SCORE/100 ($GRADE)"
+
+        if [ -n "$MCPROBE_MIN" ] && [ "$SCORE" -lt "$MCPROBE_MIN" ]; then
+          echo "::error::MCProbe score $SCORE is below the required minimum ($MCPROBE_MIN)."
+          exit 1
+        fi
