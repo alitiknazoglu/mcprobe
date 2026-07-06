@@ -39,6 +39,7 @@ describe("softenReport", () => {
       measured: true,
       silentTools: 1,
       emptySuccessTools: 0,
+      outputSchemaTools: 0,
       crashes: 0,
     });
   });

@@ -22,6 +22,8 @@ import {
   runFuzz,
   isDestructive,
   isEmptyResult,
+  makeOutputCheck,
+  looksLikeOutputSchemaError,
 } from "../src/fuzz.js";
 import type { FuzzCase, FuzzResult, ToolSummary } from "../src/types.js";
 import type { Connection } from "../src/target-client.js";
@@ -287,6 +289,64 @@ describe("isEmptyResult", () => {
   it("treats real text or non-text payload as NOT empty", () => {
     expect(isEmptyResult([{ type: "text", text: "saved id=42" }])).toBe(false);
     expect(isEmptyResult([{ type: "image", data: "…" }])).toBe(false);
+  });
+  it("treats a non-empty structuredContent as NOT empty even with empty text content", () => {
+    expect(isEmptyResult([], { id: "z" })).toBe(false);
+    expect(isEmptyResult([{ type: "text", text: "" }], { id: "z" })).toBe(false);
+  });
+  it("still empty when both content and structuredContent are empty", () => {
+    expect(isEmptyResult([], {})).toBe(true);
+    expect(isEmptyResult([], undefined)).toBe(true);
+  });
+});
+
+describe("output-schema conformance", () => {
+  const schema = {
+    type: "object",
+    properties: { id: { type: "string" }, created: { type: "boolean" } },
+    required: ["id", "created"],
+  };
+
+  it("looksLikeOutputSchemaError matches the MCP output-validation phrasing", () => {
+    expect(looksLikeOutputSchemaError("Structured content does not match the tool's output schema")).toBe(true);
+    expect(looksLikeOutputSchemaError("Tool x has an output schema but did not return structured content")).toBe(true);
+    expect(looksLikeOutputSchemaError("socket hang up")).toBe(false);
+    expect(looksLikeOutputSchemaError(undefined)).toBe(false);
+  });
+
+  it("makeOutputCheck is null when there is no schema", () => {
+    expect(makeOutputCheck(undefined)).toBeNull();
+  });
+
+  it("makeOutputCheck flags missing / invalid / passing structuredContent", () => {
+    const chk = makeOutputCheck(schema)!;
+    expect(chk(undefined).violation).toBe(true); // no structuredContent
+    expect(chk({ created: "yes" }).violation).toBe(true); // missing id, wrong type
+    expect(chk({ id: "abc", created: true }).violation).toBe(false); // valid
+  });
+
+  const callWith = (r: Partial<Awaited<ReturnType<CallFn>>>): CallFn =>
+    async () => ({ ok: true, isError: false, content: [{ type: "text", text: "ok" }], latencyMs: 1, ...r });
+
+  it("flags a valid success whose structuredContent violates the outputSchema", async () => {
+    const chk = makeOutputCheck(schema);
+    const r = await runOneCaseForTest(callWith({ structuredContent: { created: "yes" } }), "t", { label: "valid", args: {}, malformed: false }, chk);
+    expect(r.outputSchemaViolation).toBe(true);
+    expect(r.outcome).toBe("ok");
+  });
+
+  it("does NOT flag a valid success whose structuredContent matches", async () => {
+    const chk = makeOutputCheck(schema);
+    const r = await runOneCaseForTest(callWith({ structuredContent: { id: "a", created: true } }), "t", { label: "valid", args: {}, malformed: false }, chk);
+    expect(r.outputSchemaViolation).toBeFalsy();
+  });
+
+  it("reclassifies the MCP client's output-schema rejection as a violation, not a crash", async () => {
+    const chk = makeOutputCheck(schema);
+    const call: CallFn = async () => ({ ok: false, isError: true, content: [], error: "MCP error -32602: Structured content does not match the tool's output schema", latencyMs: 1 });
+    const r = await runOneCaseForTest(call, "t", { label: "valid", args: {}, malformed: false }, chk);
+    expect(r.outputSchemaViolation).toBe(true);
+    expect(r.outcome).toBe("toolError"); // not protocolCrash
   });
 });
 

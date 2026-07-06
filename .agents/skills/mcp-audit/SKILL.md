@@ -54,7 +54,9 @@ allowed to test.**
 - **Critical-issues callout:** the behaviors that hurt agents and users most, so
   surface them first — tools that **silently accept bad input**, tools that
   return an **empty success on a valid call** (a *hallucinated success*: the tool
-  reports "done" but returns/persists nothing), and **protocol crashes**.
+  reports "done" but returns/persists nothing), tools that return a success that
+  **violates their declared `outputSchema`** (the payload doesn't honor the
+  contract the tool advertised), and **protocol crashes**.
 - **Findings** carry stable dotted codes (`tool.missing_description`,
   `param.untyped`, `schema.invalid`, …) and fix hints. Report the worst-severity
   ones with the exact tool/parameter and the recommended fix.

@@ -35,6 +35,9 @@ export interface ToolSummary {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  /** JSON Schema for the tool's structured output (MCP structured output), if
+   *  the tool declares one. Used to verify a success actually honors it. */
+  outputSchema?: Record<string, unknown>;
   /** MCP tool annotations (readOnlyHint, destructiveHint, etc.), if the
    *  target declared any. Absent or empty means none were advertised. */
   annotations?: Record<string, unknown>;
@@ -57,6 +60,12 @@ export interface FuzzResult {
    *  content — empty result or only empty/whitespace text. The "hallucinated
    *  success" case: the agent reads "done" but got nothing back. */
   emptySuccess?: boolean;
+  /** A valid call whose success response violates the tool's declared
+   *  outputSchema — no structuredContent, or structuredContent that fails
+   *  validation. The tool broke its own output contract. */
+  outputSchemaViolation?: boolean;
+  /** Human-readable reason for an outputSchema violation (shown in the report). */
+  outputSchemaError?: string;
   latencyMs: number;
   errorMessage?: string;
 }

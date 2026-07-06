@@ -14,6 +14,7 @@
 // runner takes a caller-supplied call function (defaults to target-client
 // callTool) so it stays unit-testable against an in-memory fake.
 
+import { Ajv } from "ajv";
 import type {
   ToolSummary,
   FuzzCase,
@@ -239,9 +240,10 @@ export async function runFuzz(
 
   const results: FuzzResult[] = [];
   for (const tool of fuzzed) {
+    const outputCheck = makeOutputCheck(tool.outputSchema);
     const cases = generateCases(tool.inputSchema);
     for (const c of cases) {
-      const result = await runOneCase(call, tool.name, c);
+      const result = await runOneCase(call, tool.name, c, outputCheck);
       results.push(result);
     }
   }
@@ -266,11 +268,12 @@ export async function runFuzz(
 async function runOneCase(
   call: CallFn,
   toolName: string,
-  fuzzCase: FuzzCase
+  fuzzCase: FuzzCase,
+  outputCheck: OutputCheck | null = null
 ): Promise<FuzzResult> {
   try {
     const r = await call(toolName, fuzzCase.args);
-    return classify(toolName, fuzzCase, r);
+    return classify(toolName, fuzzCase, r, outputCheck);
   } catch (err) {
     // The default callTool already catches everything and never throws,
     // but a test-supplied call function may throw. Treat that as a
@@ -286,15 +289,32 @@ async function runOneCase(
   }
 }
 
-/** Translate one SDK call result into the fuzzer's outcome vocabulary. */
+/** Translate one SDK call result into the fuzzer's outcome vocabulary.
+ *  `outputCheck` (when the tool declares an outputSchema) validates a valid
+ *  call's structured success against that schema. */
 function classify(
   toolName: string,
   fuzzCase: FuzzCase,
-  r: CallToolResult
+  r: CallToolResult,
+  outputCheck: OutputCheck | null
 ): FuzzResult {
   // ok: false from the callTool wrapper means the call threw — a
-  // transport-level error, not a graceful tool error. Treat as a crash.
+  // transport-level error, not a graceful tool error. Treat as a crash —
+  // unless it's the MCP client rejecting the tool's output against its own
+  // declared outputSchema on a VALID call, which is an output-contract
+  // violation, not a wire crash.
   if (!r.ok) {
+    if (!fuzzCase.malformed && outputCheck && looksLikeOutputSchemaError(r.error)) {
+      return {
+        name: toolName,
+        case: fuzzCase.label,
+        outcome: "toolError",
+        silentlyAccepted: false,
+        outputSchemaViolation: true,
+        outputSchemaError: cleanSchemaMsg(r.error),
+        latencyMs: r.latencyMs,
+      };
+    }
     return {
       name: toolName,
       case: fuzzCase.label,
@@ -308,13 +328,25 @@ function classify(
   // For a valid case this is a real bug (a tool failed on good input);
   // for a malformed case this is the correct, graceful behavior.
   if (r.isError) {
+    const errText = extractErrorText(r.content);
+    if (!fuzzCase.malformed && outputCheck && looksLikeOutputSchemaError(errText)) {
+      return {
+        name: toolName,
+        case: fuzzCase.label,
+        outcome: "toolError",
+        silentlyAccepted: false,
+        outputSchemaViolation: true,
+        outputSchemaError: cleanSchemaMsg(errText),
+        latencyMs: r.latencyMs,
+      };
+    }
     return {
       name: toolName,
       case: fuzzCase.label,
       outcome: "toolError",
       silentlyAccepted: false,
       latencyMs: r.latencyMs,
-      errorMessage: extractErrorText(r.content),
+      errorMessage: errText,
     };
   }
   // ok: true && isError: false. If the case was malformed, the target
@@ -328,24 +360,91 @@ function classify(
       latencyMs: r.latencyMs,
     };
   }
-  // Valid case, ok, isError:false → the tool served the happy path. But if it
-  // came back with no usable content, that's a "hallucinated success" — the
-  // agent reads "done" while nothing actually happened.
+  // Valid case, ok, isError:false → the tool served the happy path. Two extra
+  // checks on the success payload:
+  //   - emptySuccess: no usable content at all (the "hallucinated success" case).
+  //   - outputSchemaViolation: the tool declared an outputSchema but the success
+  //     doesn't honor it (no structuredContent, or it fails validation).
+  const oc = outputCheck ? outputCheck(r.structuredContent) : null;
   return {
     name: toolName,
     case: fuzzCase.label,
     outcome: "ok",
     silentlyAccepted: false,
-    emptySuccess: isEmptyResult(r.content),
+    emptySuccess: isEmptyResult(r.content, r.structuredContent),
+    ...(oc?.violation
+      ? { outputSchemaViolation: true, outputSchemaError: oc.error }
+      : {}),
     latencyMs: r.latencyMs,
+  };
+}
+
+/** True when an error message is the MCP layer rejecting a tool's structured
+ *  output against its declared outputSchema (as opposed to a real wire crash). */
+export function looksLikeOutputSchemaError(msg: string | undefined): boolean {
+  return /output ?schema|structured ?content/i.test(msg ?? "");
+}
+
+/** Strip the "MCP error -32602:" style prefix for a tidy report note. */
+function cleanSchemaMsg(msg: string | undefined): string {
+  const m = (msg ?? "").replace(/^MCP error -?\d+:\s*/i, "").trim();
+  return m || "structuredContent violates the declared outputSchema";
+}
+
+/** A compiled check for a tool's declared outputSchema. Returns whether a
+ *  success response violates it, and why. */
+export type OutputCheck = (structuredContent: unknown) => {
+  violation: boolean;
+  error?: string;
+};
+
+/** Compile a tool's `outputSchema` into an OutputCheck, or null when there's no
+ *  schema (nothing to check) or it can't compile (don't fabricate a violation).
+ *  A tool that declares an outputSchema is expected to return `structuredContent`
+ *  that validates against it. */
+export function makeOutputCheck(
+  outputSchema: Record<string, unknown> | undefined
+): OutputCheck | null {
+  if (!outputSchema || typeof outputSchema !== "object") return null;
+  let validate: ReturnType<Ajv["compile"]>;
+  try {
+    validate = new Ajv({ strict: false, allErrors: true }).compile(outputSchema);
+  } catch {
+    return null; // uncompilable declared schema — can't validate, so don't flag
+  }
+  return (structuredContent) => {
+    if (structuredContent === undefined || structuredContent === null) {
+      return {
+        violation: true,
+        error: "declared an outputSchema but returned no structuredContent",
+      };
+    }
+    if (validate(structuredContent)) return { violation: false };
+    const first = validate.errors?.[0];
+    const where = first?.instancePath ? first.instancePath : "(root)";
+    return {
+      violation: true,
+      error: first
+        ? `structuredContent ${where} ${first.message}`
+        : "structuredContent does not match the declared outputSchema",
+    };
   };
 }
 
 /** A successful call whose result carries no usable payload — an empty content
  *  array, or only empty/whitespace text parts. A non-text part (image,
- *  resource, audio) counts as a real payload. This is the "hallucinated
- *  success" smell: ok came back, but the caller got nothing to act on. */
-export function isEmptyResult(content: unknown): boolean {
+ *  resource, audio) OR a non-empty `structuredContent` object counts as a real
+ *  payload. This is the "hallucinated success" smell: ok came back, but the
+ *  caller got nothing to act on. */
+export function isEmptyResult(content: unknown, structuredContent?: unknown): boolean {
+  // A non-empty structured payload is a real result even if `content` is empty.
+  if (
+    structuredContent &&
+    typeof structuredContent === "object" &&
+    Object.keys(structuredContent as Record<string, unknown>).length > 0
+  ) {
+    return false;
+  }
   if (!Array.isArray(content) || content.length === 0) return true;
   return content.every((part) => {
     if (!part || typeof part !== "object") return true;
@@ -553,9 +652,10 @@ export function summarizeFuzz(results: FuzzResult[]): FuzzSummary {
 export async function runOneCaseForTest(
   call: CallFn,
   toolName: string,
-  fuzzCase: FuzzCase
+  fuzzCase: FuzzCase,
+  outputCheck: OutputCheck | null = null
 ): Promise<FuzzResult> {
-  return runOneCase(call, toolName, fuzzCase);
+  return runOneCase(call, toolName, fuzzCase, outputCheck);
 }
 
 // Re-export the FuzzOutcome type so the index.ts handler can refer to

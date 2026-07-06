@@ -148,6 +148,8 @@ export interface SoftReport {
     silentTools: number;
     /** Tools that return an empty success on a valid call (hallucinated success). */
     emptySuccessTools: number;
+    /** Tools whose success violates their own declared outputSchema. */
+    outputSchemaTools: number;
     crashes: number;
   };
   /** Sections withheld until the user unlocks the full report. */
@@ -171,6 +173,9 @@ export function softenReport(report: ConformanceReport): SoftReport {
   const emptySuccessTools = new Set(
     report.fuzz.filter((r) => r.emptySuccess).map((r) => r.name)
   );
+  const outputSchemaTools = new Set(
+    report.fuzz.filter((r) => r.outputSchemaViolation).map((r) => r.name)
+  );
   const crashes = report.fuzz.filter((r) => r.outcome === "protocolCrash").length;
 
   return {
@@ -189,6 +194,7 @@ export function softenReport(report: ConformanceReport): SoftReport {
       measured: report.fuzz.length > 0,
       silentTools: silentTools.size,
       emptySuccessTools: emptySuccessTools.size,
+      outputSchemaTools: outputSchemaTools.size,
       crashes,
     },
     locked: ["dimensionReasons", "findingsList", "fuzzTable", "recommendedFixes"],

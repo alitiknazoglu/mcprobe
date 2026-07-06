@@ -251,10 +251,20 @@ lint, transport, stdio, capability, severity, finding.
   recommended-fixes output changes with it — no extra wiring needed.
 - **Hallucinated success (`emptySuccess`).** `classify` (src/fuzz.ts) flags a
   *valid* case that returns `isError:false` with no usable content (empty array
-  or only empty/whitespace text — see `isEmptyResult`) as `emptySuccess`.
+  or only empty/whitespace text — see `isEmptyResult`, which now also treats a
+  non-empty `structuredContent` as a real result) as `emptySuccess`.
   `scoreLiveness` does **not** credit those calls (they aren't a real success),
   and the report hoists them onto the critical line + a "return a confirmation
   payload" recommended fix. This is the "agent said done, nothing happened" case.
+- **Output-schema conformance (`outputSchemaViolation`).** When a tool declares
+  an `outputSchema` (captured in `toToolSummary`), `runFuzz` compiles it once per
+  tool (`makeOutputCheck`, Ajv) and `classify` checks a *valid* success against
+  it. Because the MCP **client** SDK also validates output and throws on a
+  mismatch, `classify` reclassifies that error (matched via
+  `looksLikeOutputSchemaError`) from a misleading `protocolCrash` into an
+  `outputSchemaViolation` (outcome `toolError`) — and `scoreLiveness` checks the
+  flag first, regardless of outcome, so it's never credited. Report + soft report
+  + recommended fixes mirror the `emptySuccess` wiring.
 - **Normalized, non-overlapping scoring** (src/conformance.ts). The two
   behavioral dimensions are rate-based so scores compare across server
   sizes, and they **partition the fuzz cases by kind** — malformed cases

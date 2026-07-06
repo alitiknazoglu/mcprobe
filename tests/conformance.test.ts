@@ -45,6 +45,10 @@ const validEmptyOk = (n = "t"): FuzzResult => ({
   ...row("valid", "ok", false, 1, n),
   emptySuccess: true,
 });
+const validSchemaViolation = (n = "t"): FuzzResult => ({
+  ...row("valid", "toolError", false, 1, n), // reclassified from the client's rejection
+  outputSchemaViolation: true,
+});
 
 // ---------------------------------------------------------------------------
 // scoreErrorHandling — graceful-rejection rate over malformed cases
@@ -101,6 +105,16 @@ describe("scoreLiveness", () => {
 
   it("scores 0 when the only valid call is an empty success", () => {
     const d = scoreLiveness([validEmptyOk()]);
+    expect(d.score).toBe(0);
+  });
+
+  it("does not credit a valid call that violates the tool's declared outputSchema", () => {
+    const d = scoreLiveness([validOk(), validSchemaViolation()]);
+    expect(d.score).toBe(5); // 1 of 2 valid calls honored its contract
+  });
+
+  it("scores 0 when the only valid call violates its outputSchema", () => {
+    const d = scoreLiveness([validSchemaViolation()]);
     expect(d.score).toBe(0);
   });
 

@@ -179,17 +179,23 @@ export function scoreLiveness(fuzzResults: FuzzResult[]): DimensionScore {
   let ok = 0;
   let failures = 0;
   let emptyOk = 0;
+  let schemaViol = 0;
   const okLatencies: number[] = [];
   for (const r of valid) {
-    if (r.outcome === "ok" && r.emptySuccess) {
+    if (r.outputSchemaViolation) {
+      // Success (or a client-rejected success) whose payload violates the tool's
+      // own outputSchema. Checked first because the reclassified ones carry a
+      // toolError outcome. Not credited: it doesn't honor its advertised contract.
+      schemaViol += 1;
+    } else if (r.outcome !== "ok") {
+      failures += 1;
+    } else if (r.emptySuccess) {
       // Returned success but with no usable content — a "hallucinated success".
       // Not credited: the caller can't tell it from a real result.
       emptyOk += 1;
-    } else if (r.outcome === "ok") {
+    } else {
       ok += 1;
       okLatencies.push(r.latencyMs);
-    } else {
-      failures += 1;
     }
   }
 
@@ -206,6 +212,11 @@ export function scoreLiveness(fuzzResults: FuzzResult[]): DimensionScore {
     if (emptyOk > 0) {
       reasons.push(
         `${emptyOk} valid call(s) returned success but an empty/contentless response — possible hallucinated success (an agent can't tell it from a real result)`
+      );
+    }
+    if (schemaViol > 0) {
+      reasons.push(
+        `${schemaViol} valid call(s) returned success that violates the tool's declared outputSchema — the payload doesn't honor the contract it advertised`
       );
     }
     if (failures > 0) {

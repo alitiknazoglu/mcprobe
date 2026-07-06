@@ -42,6 +42,8 @@ export interface CallToolResult {
   ok: boolean;
   isError: boolean;
   content: unknown[];
+  /** Structured output the tool returned (MCP structured output), if any. */
+  structuredContent?: unknown;
   error?: string;
   latencyMs: number;
 }
@@ -228,12 +230,17 @@ function toToolSummary(raw: unknown): ToolSummary {
     name?: string;
     description?: string;
     inputSchema?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
     annotations?: Record<string, unknown>;
   };
   return {
     name: String(t.name ?? ""),
     description: typeof t.description === "string" ? t.description : undefined,
     inputSchema: t.inputSchema ?? { type: "object", properties: {} },
+    outputSchema:
+      t.outputSchema && typeof t.outputSchema === "object"
+        ? t.outputSchema
+        : undefined,
     annotations:
       t.annotations && typeof t.annotations === "object"
         ? t.annotations
@@ -385,6 +392,7 @@ export async function callTool(
       ok: true,
       isError: Boolean(result.isError),
       content: Array.isArray(result.content) ? result.content : [],
+      structuredContent: (result as { structuredContent?: unknown }).structuredContent,
       latencyMs,
     };
   } catch (err) {

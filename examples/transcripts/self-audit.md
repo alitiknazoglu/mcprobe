@@ -6,7 +6,7 @@ This transcript is the AC-8 **self-audit**: a second copy of `dist/index.js` was
 **Host probe:** first copy of `/Users/probablynothing/Desktop/hackathon/mcprobe-work/dist/index.js`
 **Target handshake:** `mcprobe` 0.1.0 (tools=6, resources=0, prompts=0)
 **Target capabilities:** tools
-**Audit timestamp (UTC):** 2026-07-01T16:43:19.895Z
+**Audit timestamp (UTC):** 2026-07-06T06:44:17.605Z
 **Static rollup (gating):** 94/100, grade **A**
 **Behavioral rollup (informational):** 76/100, grade **B**
 
@@ -89,7 +89,7 @@ The canonical self-audit score above uses the spec's measured-only rollup (stati
 - 1 malformed case(s) silently accepted — the tool let bad input through
 
 ### Liveness & Performance: 2 / 10
-- 1/5 valid call(s) succeeded (20%)
+- 1/5 valid call(s) returned a real result (20%)
 - 4 valid call(s) failed on good input (tool error or protocol crash)
 - p50 latency on valid calls = 0ms (target 200ms)
 - valid-call latency max = 0ms across 1 call(s)
@@ -109,12 +109,12 @@ The canonical self-audit score above uses the spec's measured-only rollup (stati
 | Tool | Case | Outcome | Silent | Latency (ms) | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `probe_connect` | `valid` | toolError | no | 2 | MCP error -32602: Input validation error: Invalid arguments… |
-| `probe_connect` | `missing_required:transport` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `probe_connect` | `wrong_type:transport` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `probe_connect` | `wrong_type:command` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
+| `probe_connect` | `missing_required:transport` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `probe_connect` | `wrong_type:transport` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `probe_connect` | `wrong_type:command` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `probe_connect` | `wrong_type:args` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `probe_connect` | `wrong_type:env` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `probe_connect` | `wrong_type:url` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
+| `probe_connect` | `wrong_type:url` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `probe_connect` | `out_of_enum:transport` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `probe_connect` | `extra_garbage` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
 | `probe_lint` | `valid` | toolError | no | 0 | [probe_lint] connection 'mcprobe-connectionId' not found |
@@ -143,4 +143,4 @@ Address these to raise the score, worst first:
 ---
 
 *Self-audit script: `scripts/self-audit.mjs`*
-*Audit timestamp (UTC): 2026-07-01T16:43:19.895Z*
+*Audit timestamp (UTC): 2026-07-06T06:44:17.605Z*

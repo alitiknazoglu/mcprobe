@@ -289,7 +289,7 @@ The classifier assigns one of three outcomes:
 
 | Outcome | Meaning |
 | --- | --- |
-| `ok` | The target returned a result with `isError: false`. For a malformed case this is `silentlyAccepted: true`; for a **valid** case with no usable content it is `emptySuccess: true`. |
+| `ok` | The target returned a result with `isError: false`. For a malformed case this is `silentlyAccepted: true`; for a **valid** case with no usable content it is `emptySuccess: true`, and a valid success that breaks the tool's declared `outputSchema` is `outputSchemaViolation: true`. |
 | `toolError` | The target returned a result with `isError: true` (graceful rejection). |
 | `protocolCrash` | The call rejected or the transport closed. |
 
@@ -299,6 +299,17 @@ with an empty body and never persists anything. The agent reads "done" while
 nothing happened. MCProbe flags this on the critical line, drops **Liveness**
 credit for that call (it isn't a real success), and recommends returning a
 confirmation payload. This is the "the agent said done, nothing happened" bug.
+(A tool that returns valid `structuredContent` but empty text content is **not**
+flagged — the structured payload is a real result.)
+
+**Output-schema conformance (`outputSchemaViolation`).** When a tool declares an
+`outputSchema` (MCP structured output), MCProbe checks that a valid call actually
+honors it — the success must return `structuredContent` that validates against
+the declared schema. A tool that advertises an output contract and then returns
+no structured content, or a payload that doesn't match, is flagged (and reported
+as an output-schema violation rather than a misleading "protocol crash"). Not
+credited in **Liveness** — a success that breaks its own contract isn't a real
+success.
 
 **Dry-run safety.** By default, tools annotated `destructiveHint: true`
 are **not** fuzzed — so pointing MCProbe at a server you don't control
