@@ -34,6 +34,13 @@ export interface AuditUrlOptions {
    *  can pass a wrapper that enforces its own network policy — e.g. an SSRF
    *  guard that re-resolves the host and refuses redirects. */
   fetch?: FetchLike;
+  /** Extra request headers for the HTTP transport (ignored by auditStdio,
+   *  which passes credentials via `env` instead). This is how you audit a
+   *  server that requires a key: `{ Authorization: "Bearer sk-..." }`.
+   *
+   *  The credential is sent to whoever controls the URL, so only use it with
+   *  a server you trust. Never logged, and never written into the report. */
+  headers?: Record<string, string>;
 }
 
 /** Options for auditing a local stdio MCP server (a subprocess). */
@@ -98,7 +105,7 @@ export async function auditUrl(
   url: string,
   opts: AuditUrlOptions = {}
 ): Promise<ConformanceReport> {
-  const conn = await connectHttp({ url, fetch: opts.fetch });
+  const conn = await connectHttp({ url, fetch: opts.fetch, headers: opts.headers });
   return auditConnection(conn, opts);
 }
 

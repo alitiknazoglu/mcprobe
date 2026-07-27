@@ -2,6 +2,7 @@
 //
 //   mcprobe audit <url>                      static audit of an HTTP server
 //   mcprobe audit <url> --fuzz               + behavioral fuzzing
+//   mcprobe audit <url> --bearer <token>     audit a server that needs a key
 //   mcprobe audit --stdio "npx my-server"    audit a local stdio server
 //   mcprobe push  <target> --token <key>     run the audit and upload it
 //   mcprobe serve                            run the MCP server (default)
@@ -28,6 +29,19 @@ interface CliArgs {
   json: boolean;
   token?: string;
   to?: string;
+  /** Headers sent to the *target* server — distinct from `token`, which
+   *  authenticates us to the ingest endpoint. Keeping these separate matters:
+   *  handing an MCProbe token to a third-party target would leak it. */
+  headers?: Record<string, string>;
+}
+
+/** Parse a `--header "Name: Value"` argument. */
+function parseHeaderArg(raw: string | undefined): [string, string] {
+  const at = raw?.indexOf(":") ?? -1;
+  if (!raw || at <= 0) {
+    throw new Error(`--header expects "Name: Value" (got: ${raw ?? "nothing"})`);
+  }
+  return [raw.slice(0, at).trim(), raw.slice(at + 1).trim()];
 }
 
 function parseArgs(rest: string[]): CliArgs {
@@ -43,7 +57,18 @@ function parseArgs(rest: string[]): CliArgs {
     else if (a === "--stdio") out.stdio = rest[++i];
     else if (a === "--token") out.token = rest[++i];
     else if (a === "--to") out.to = rest[++i];
-    else if (!a.startsWith("-") && !out.url) out.url = a; // positional URL
+    else if (a === "--bearer") {
+      const t = rest[++i];
+      if (t) (out.headers ??= {})["Authorization"] = `Bearer ${t}`;
+    } else if (a === "--header") {
+      const [name, value] = parseHeaderArg(rest[++i]);
+      (out.headers ??= {})[name] = value;
+    } else if (!a.startsWith("-") && !out.url) out.url = a; // positional URL
+  }
+  // Env fallback keeps the credential out of shell history. Explicit flags win.
+  const envToken = process.env.MCPROBE_TARGET_TOKEN;
+  if (envToken && !out.headers?.["Authorization"]) {
+    (out.headers ??= {})["Authorization"] = `Bearer ${envToken}`;
   }
   return out;
 }
@@ -51,12 +76,17 @@ function parseArgs(rest: string[]): CliArgs {
 async function runAudit(args: CliArgs): Promise<ConformanceReport> {
   const opts = { fuzz: args.fuzz, fuzzDestructive: args.fuzzDestructive };
   if (args.stdio) {
+    if (args.headers) {
+      throw new Error(
+        "--bearer/--header apply to HTTP targets; a stdio server takes credentials via its own env"
+      );
+    }
     const parts = args.stdio.trim().split(/\s+/).filter(Boolean);
     const command = parts[0];
     if (!command) throw new Error('--stdio needs a command, e.g. --stdio "npx my-server"');
     return auditStdio(command, { ...opts, args: parts.slice(1) });
   }
-  if (args.url) return auditUrl(args.url, opts);
+  if (args.url) return auditUrl(args.url, { ...opts, headers: args.headers });
   throw new Error(
     'no target — pass an HTTPS URL or --stdio "<command>" (e.g. --stdio "npx my-server")'
   );
@@ -164,6 +194,7 @@ Usage:
 Examples:
   mcprobe audit https://docs.base.org/mcp --fuzz
   mcprobe audit --stdio "npx @acme/my-mcp-server" --fuzz
+  mcprobe audit https://api.acme.com/mcp --bearer sk_live_xxx --fuzz
   mcprobe push  --stdio "npx @acme/my-mcp-server" --fuzz --token mcp_xxx
 
 Flags:
@@ -171,10 +202,16 @@ Flags:
   --fuzz-destructive    additionally fuzz tools marked destructive (implies --fuzz)
   --json                (audit/push) print the report as JSON instead of Markdown
   --stdio "<command>"   audit a local stdio server instead of a URL
-  --token <key>         (push) bearer token for the ingest endpoint
+  --bearer <token>      credential for the TARGET server (sends Authorization: Bearer)
+  --header "N: V"       arbitrary header for the TARGET server (repeatable)
+  --token <key>         (push) bearer token for the MCProbe ingest endpoint
   --to <url>            (push) ingest endpoint (default ${DEFAULT_ENDPOINT})
 
-Env: MCPROBE_TOKEN, MCPROBE_API
+  Note: --bearer/--header authenticate you to the server being audited;
+  --token authenticates you to MCProbe. Never pass your MCProbe token as
+  --bearer — it would be sent to the audited server.
+
+Env: MCPROBE_TOKEN (ingest), MCPROBE_TARGET_TOKEN (target server), MCPROBE_API
 `
   );
 }

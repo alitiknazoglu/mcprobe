@@ -132,7 +132,19 @@ node dist/index.js audit https://docs.base.org/mcp --fuzz
 
 # audit a LOCAL stdio server (no URL — the `npx some-server` style)
 node dist/index.js audit --stdio "npx @acme/my-mcp-server" --fuzz
+
+# audit a server that requires credentials
+node dist/index.js audit https://api.acme.com/mcp --bearer sk_live_xxx --fuzz
+node dist/index.js audit https://api.acme.com/mcp --header "X-API-Key: xxx"
 ```
+
+`--bearer`/`--header` authenticate you to the **server being audited**, and are
+sent on every request to it — so only point them at a server you trust. Set
+`MCPROBE_TARGET_TOKEN` instead of `--bearer` to keep the key out of your shell
+history. (Don't confuse these with `push --token`, which authenticates you to
+*MCProbe*; passing that as `--bearer` would hand your MCProbe key to a third
+party.) A stdio server takes its credentials through its own environment
+instead.
 
 (After `npm install -g .` or `npm link`, the command is just `mcprobe audit …`.)
 
@@ -444,6 +456,13 @@ import { auditUrl, auditStdio, softenReport, renderReport } from "mcprobe/audit"
 
 // HTTP server (URL in, report out — never spawns a process):
 const report = await auditUrl("https://example.com/mcp", { fuzz: false });
+
+// A server that requires credentials — headers ride along on every request
+// (connect *and* tool calls), so the whole audit works, fuzzing included:
+const gated = await auditUrl("https://api.acme.com/mcp", {
+  fuzz: true,
+  headers: { Authorization: "Bearer sk_live_xxx" },
+});
 
 // Local stdio server (spawns the subprocess — only run commands you trust):
 const local = await auditStdio("npx", { args: ["@acme/my-mcp-server"], fuzz: true });

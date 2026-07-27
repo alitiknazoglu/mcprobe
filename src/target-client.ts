@@ -36,6 +36,103 @@ export interface ConnectHttpOptions {
    *  Lets an embedder wrap requests with their own policy (e.g. an SSRF guard
    *  that re-checks the host and refuses redirects). Defaults to global fetch. */
   fetch?: FetchLike;
+  /** Extra request headers — how you audit a server that requires credentials
+   *  (`{ Authorization: "Bearer sk-..." }`, `{ "X-API-Key": "..." }`).
+   *
+   *  Sent on every request to the target, so only point this at a server you
+   *  trust: whoever controls the URL receives the credential. Values are
+   *  validated by `sanitizeHeaders` and never logged. */
+  headers?: Record<string, string>;
+}
+
+// ---------------------------------------------------------------------------
+// Credential hygiene
+// ---------------------------------------------------------------------------
+
+/** Headers the transports own. Overriding any of these breaks the protocol
+ *  (or lets a caller retarget the request), so they are refused outright
+ *  rather than silently dropped. */
+const RESERVED_HEADERS = new Set([
+  "host",
+  "connection",
+  "content-length",
+  "content-type",
+  "accept",
+  "mcp-session-id",
+  "mcp-protocol-version",
+]);
+
+/** Query parameters whose values are treated as secrets when a URL is logged. */
+const SECRET_PARAMS =
+  /^(api[-_]?key|access[-_]?token|auth|authorization|key|password|secret|token)$/i;
+
+/**
+ * Validate caller-supplied request headers.
+ *
+ * Throws rather than dropping a bad header: silently ignoring a malformed
+ * `Authorization` would surface as a confusing 401 from the target instead of
+ * the real cause. Rejects CR/LF and control characters (header injection) and
+ * transport-owned names.
+ */
+export function sanitizeHeaders(
+  headers: Record<string, string>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [rawName, rawValue] of Object.entries(headers)) {
+    const name = rawName.trim();
+    const value = typeof rawValue === "string" ? rawValue.trim() : "";
+    if (!name) throw new Error("header name cannot be empty");
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) {
+      throw new Error(`invalid header name: ${name}`);
+    }
+    // Control characters are the header-injection vector (CR/LF splits
+    // one header into two). Escapes, not literals, so the source stays
+    // free of raw control bytes.
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001F\u007F]/.test(value)) {
+      throw new Error(`header ${name} contains control characters`);
+    }
+    if (RESERVED_HEADERS.has(name.toLowerCase())) {
+      throw new Error(`header ${name} is managed by the transport and cannot be set`);
+    }
+    if (!value) continue; // an empty value is a no-op, not an error
+    out[name] = value;
+  }
+  return out;
+}
+
+/**
+ * Mask credentials embedded in a URL so it is safe to log or echo in an error.
+ * Covers both `https://user:pass@host` and `?api_key=...` styles.
+ *
+ * Implemented with string surgery rather than the URL API on purpose: this
+ * package compiles with `lib: ES2022` and no `@types/node`, so `URL`'s
+ * `username`/`searchParams` members aren't in scope here.
+ */
+export function redactUrl(raw: string): string {
+  if (typeof raw !== "string" || !raw) return "<empty url>";
+
+  // scheme://user:pass@host -> scheme://***@host
+  let out = raw.replace(/^([a-z][a-z0-9+.\-]*:\/\/)[^/?#@]*@/i, "$1***@");
+
+  // ?token=secret&x=1 -> ?token=***&x=1  (also masks the fragment's query)
+  const q = out.indexOf("?");
+  if (q !== -1) {
+    const hash = out.indexOf("#", q);
+    const end = hash === -1 ? out.length : hash;
+    const masked = out
+      .slice(q + 1, end)
+      .split("&")
+      .map((pair) => {
+        const eq = pair.indexOf("=");
+        if (eq <= 0) return pair;
+        const key = pair.slice(0, eq);
+        return SECRET_PARAMS.test(decodeURIComponent(key)) ? `${key}=***` : pair;
+      })
+      .join("&");
+    out = out.slice(0, q + 1) + masked + out.slice(end);
+  }
+  return out;
 }
 
 export interface CallToolResult {
@@ -353,13 +450,23 @@ export async function connectHttp(opts: ConnectHttpOptions): Promise<Connection>
   const transport: Transport = createHttpTransport(opts);
   const client = makeClient();
   await client.connect(transport);
-  console.error(`[mcprobe] connected (http): ${opts.url}`);
+  console.error(`[mcprobe] connected (http): ${redactUrl(opts.url)}`);
   return finalizeConnection(client, "http");
 }
 
 function createHttpTransport(opts: ConnectHttpOptions): Transport {
-  // Pass the embedder's custom fetch through to the transport when supplied.
-  const transportOpts = opts.fetch ? { fetch: opts.fetch } : undefined;
+  // Pass the embedder's custom fetch and any auth headers through to the
+  // transport. Both HTTP transports merge `requestInit.headers` into every
+  // request they make — for SSE that includes the event-stream GET, not just
+  // the POSTs — so one option covers the whole session.
+  const headers = opts.headers ? sanitizeHeaders(opts.headers) : undefined;
+  const transportOpts =
+    opts.fetch || headers
+      ? {
+          ...(opts.fetch ? { fetch: opts.fetch } : {}),
+          ...(headers ? { requestInit: { headers } } : {}),
+        }
+      : undefined;
   // Prefer the modern streamable HTTP transport. The spec tells us to
   // fall back to SSE if the resolved SDK version doesn't expose it.
   if (opts.prefer !== "sse") {
@@ -367,7 +474,7 @@ function createHttpTransport(opts: ConnectHttpOptions): Transport {
       return new StreamableHTTPClientTransport(new URL(opts.url), transportOpts);
     } catch (err) {
       console.error(
-        `[mcprobe] streamable-http transport failed to construct for ${opts.url}, falling back to SSE:`,
+        `[mcprobe] streamable-http transport failed to construct for ${redactUrl(opts.url)}, falling back to SSE:`,
         (err as Error).message
       );
     }
