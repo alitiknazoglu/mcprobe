@@ -32,11 +32,33 @@ npx mcprobe audit https://example.com/mcp --fuzz
 # Local stdio server (the `npx some-server` style)
 npx mcprobe audit --stdio "npx @acme/my-mcp-server" --fuzz
 
+# A server that requires an API key
+npx mcprobe audit https://api.acme.com/mcp --bearer "$ACME_TOKEN" --fuzz
+npx mcprobe audit https://api.acme.com/mcp --header "X-API-Key: $ACME_KEY"
+
 # Machine-readable output (for scripting / CI gates)
 npx mcprobe audit https://example.com/mcp --fuzz --json
 ```
 Omit `--fuzz` for a fast static (schema-only) audit. Add `--json` to parse the
 result programmatically.
+
+## Auditing a server that needs credentials
+If a target answers `401`/`Unauthorized`, it needs a credential: pass it with
+`--bearer <token>` (sends `Authorization: Bearer …`) or `--header "Name: Value"`
+for anything else. `MCPROBE_TARGET_TOKEN` works instead of `--bearer`.
+
+Three things to get right:
+- **Never invent or guess a credential, and never reuse one the user hasn't
+  offered for this purpose.** Ask the user for it, and prefer an environment
+  variable over pasting the literal value into a command you echo back.
+- **`--bearer` and `--token` are different keys.** `--bearer` authenticates to
+  the *server being audited*; `--token` authenticates to *mcprobe.org* for
+  `push`. Passing the MCProbe token as `--bearer` would hand it to a third party.
+- **A stdio server takes credentials through its own environment**, not these
+  flags — the CLI rejects them for `--stdio` targets.
+
+Servers behind a full OAuth login flow can't be audited yet; say so plainly
+rather than trying to synthesize a token.
 
 ## What `--fuzz` does — and the safety rule
 Fuzzing **calls each tool with malformed input** to test error handling and

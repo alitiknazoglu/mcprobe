@@ -93,6 +93,8 @@ mcprobe/
 │   ├── conformance.test.ts  # normalized scoring + no-overlap + coverage rendering
 │   ├── target-client.test.ts # safeList tolerance (introspection never crashes)
 │   ├── demo-target.test.ts  # live spawn of examples/demo-target
+│   ├── audit-stdio.test.ts  # auditStdio() against the demo target
+│   ├── auth-headers.test.ts # credential hygiene + a live gated HTTP server
 │   └── audit.test.ts        # softenReport() free-tier boundary
 └── dist/                 # tsc output for the probe (gitignored; produced by `npm run build`)
     └── examples/demo-target/dist/  # tsc output for the demo target
@@ -320,3 +322,21 @@ If the resolved `@modelcontextprotocol/sdk` version exposes
 `src/target-client.ts` so future agents know which transport was
 wired. The probe does not expose an HTTP endpoint of its own — it is
 a stdio MCP server, period.
+
+**Auditing a gated target.** `connectHttp`/`auditUrl` take an optional
+`headers` record, passed to the transport as `requestInit.headers`. Both
+transports merge it into every request (for SSE that includes the
+event-stream GET), so the credential rides along on tool calls too and
+fuzzing a gated server works. Two rules when touching this path:
+
+- Run caller-supplied headers through `sanitizeHeaders` — it rejects
+  CR/LF and control characters (header injection) and transport-owned
+  names, and **throws rather than dropping**, so a bad header surfaces as
+  itself instead of a confusing 401 from the target.
+- Never log a raw target URL. Use `redactUrl`, which masks
+  `user:pass@` userinfo and secret-looking query parameters. A credential
+  in a query string is a real case, and stderr is not a safe place for it.
+
+Credentials must never reach a `ConformanceReport` — `auth-headers.test.ts`
+asserts this. OAuth-protected servers are out of scope; only static
+credentials sent as headers are supported.

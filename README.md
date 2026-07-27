@@ -551,6 +551,12 @@ that proves the build artifact loads over the real protocol.
   is an explicit change to the spec.
 - **The probe is a stdio MCP server, full stop.** It does not
   expose an HTTP endpoint. Run it as a subprocess of your host.
+- **Only static credentials are supported.** A server behind an API key
+  or bearer token can be audited with `--bearer` / `--header` (or the
+  `headers` option in the library). A server that requires a full OAuth
+  login flow — an authorization-code/PKCE dance with dynamic client
+  registration — cannot be audited yet, because MCProbe has no way to
+  complete that flow on your behalf.
 - **The fuzzer is shallow, not adversarial.** It exercises the
   surface documented by the tool's `inputSchema`; it does not
   attempt to discover server-side bugs that are out of band of
