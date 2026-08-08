@@ -95,6 +95,7 @@ mcprobe/
 │   ├── demo-target.test.ts  # live spawn of examples/demo-target
 │   ├── audit-stdio.test.ts  # auditStdio() against the demo target
 │   ├── auth-headers.test.ts # credential hygiene + a live gated HTTP server
+│   ├── schema-quality-rate.test.ts # Schema Quality is size-independent
 │   └── audit.test.ts        # softenReport() free-tier boundary
 └── dist/                 # tsc output for the probe (gitignored; produced by `npm run build`)
     └── examples/demo-target/dist/  # tsc output for the demo target
@@ -267,13 +268,23 @@ lint, transport, stdio, capability, severity, finding.
   `outputSchemaViolation` (outcome `toolError`) — and `scoreLiveness` checks the
   flag first, regardless of outcome, so it's never credited. Report + soft report
   + recommended fixes mirror the `emptySuccess` wiring.
-- **Normalized, non-overlapping scoring** (src/conformance.ts). The two
-  behavioral dimensions are rate-based so scores compare across server
-  sizes, and they **partition the fuzz cases by kind** — malformed cases
-  score Error Handling (`graceful / malformed`), valid cases score
+- **Normalized, non-overlapping scoring** (src/conformance.ts). **All three
+  scored-from-data dimensions are rate-based** so scores compare across server
+  sizes. The behavioral pair **partition the fuzz cases by kind** — malformed
+  cases score Error Handling (`graceful / malformed`), valid cases score
   Liveness (`ok / valid`). Never score a case in both dimensions; that
   double-count was removed on purpose. `conformance.test.ts` pins both
   rates and the no-overlap guarantee.
+- **Schema Quality is a per-tool rate too** (`scoreSchemaQuality`, needs
+  `toolCount`). Findings are weighted by severity, summed **per tool**, capped
+  at `PER_TOOL_CAP` (2) so one pathological tool can't sink a server, then
+  averaged over *every advertised tool* — clean tools must dilute the average,
+  or a server is judged only on its worst. This replaced an absolute
+  subtractive model that punished breadth: a real 48-tool server with **zero
+  errors** scored 0/10 because each tool contributed one info finding, while
+  identical per-tool quality scored ~8 on a 5-tool server.
+  `schema-quality-rate.test.ts` pins size-independence. **Changing this
+  changes every historical score** — re-audit the gallery after touching it.
 - When fuzz is requested but no case ran (every tool skipped), the
   behavioral dimensions report **not measured** and drop out of the
   rollup — the same path as a static (`fuzz: false`) audit.

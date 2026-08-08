@@ -78,22 +78,64 @@ export function scoreMetadata(
 
 /** Start at 10; subtract 1 per error, 0.5 per warning, 0.25 per info
  *  across the lint findings. Empty findings list is full marks. */
-export function scoreSchemaQuality(findings: Finding[]): DimensionScore {
+/** Deduction weights per finding severity. */
+const SEVERITY_WEIGHT: Record<string, number> = { error: 1, warning: 0.5, info: 0.25 };
+
+/** Worst deduction a single tool can contribute. Two errors' worth — a tool
+ *  with no description *and* an invalid schema is already fully broken, and
+ *  piling on more findings shouldn't let one pathological tool sink the whole
+ *  server's score. Also the divisor that turns the per-tool average into a rate. */
+const PER_TOOL_CAP = 2;
+
+export function scoreSchemaQuality(
+  findings: Finding[],
+  toolCount?: number
+): DimensionScore {
   const reasons: string[] = [];
-  let score = 10;
 
   const errors = findings.filter((f) => f.severity === "error").length;
   const warnings = findings.filter((f) => f.severity === "warning").length;
   const infos = findings.filter((f) => f.severity === "info").length;
 
-  const deduction = errors * 1 + warnings * 0.5 + infos * 0.25;
-  score -= deduction;
+  // Group per tool so the score is a *rate* — the same per-tool quality has to
+  // score the same on a 5-tool server and a 50-tool one. Scoring the raw sum
+  // punished breadth: a 48-tool server accrued 48 "no annotations" infos and
+  // bottomed out while a 3-tool server with identical schemas scored ~9.
+  // (Error Handling and Liveness were already rate-based; this matches them.)
+  const perTool = new Map<string, number>();
+  let serverWide = 0;
+  for (const f of findings) {
+    const weight = SEVERITY_WEIGHT[f.severity] ?? 0;
+    const tool = f.location?.tool;
+    if (tool) perTool.set(tool, (perTool.get(tool) ?? 0) + weight);
+    else serverWide += weight;
+  }
+
+  // Prefer the real tool count: tools with zero findings are clean and must
+  // dilute the average, otherwise a server is judged only on its worst tools.
+  const tools = Math.max(toolCount ?? 0, perTool.size);
+
+  let score: number;
+  if (tools === 0) {
+    // Nothing to normalize against (no tools advertised). Fall back to the
+    // absolute deduction so a server-wide finding still registers.
+    score = 10 - serverWide;
+  } else {
+    let capped = 0;
+    for (const d of perTool.values()) capped += Math.min(d, PER_TOOL_CAP);
+    const avgPerTool = capped / tools + serverWide;
+    score = 10 - 10 * Math.min(1, avgPerTool / PER_TOOL_CAP);
+  }
 
   if (findings.length === 0) {
     reasons.push("no lint findings — schemas pass every rule");
   } else {
+    const deduction = errors * 1 + warnings * 0.5 + infos * 0.25;
     reasons.push(
-      `deducted ${deduction.toFixed(2)} from ${findings.length} finding(s): ${errors} error, ${warnings} warning, ${infos} info`
+      `${findings.length} finding(s) across ${tools} tool(s): ${errors} error, ${warnings} warning, ${infos} info`
+    );
+    reasons.push(
+      `scored as a per-tool rate (${(deduction / Math.max(tools, 1)).toFixed(2)} deduction per tool), so breadth isn't penalized`
     );
     // List the top offenders so the report stays scannable.
     const codes = new Map<string, number>();
@@ -308,12 +350,19 @@ export function buildReport(
   capabilities: Record<string, unknown>,
   findings: Finding[],
   fuzz: FuzzResult[],
-  options: { fuzzMeasured: boolean; coverage?: FuzzCoverage } = {
+  options: {
+    fuzzMeasured: boolean;
+    coverage?: FuzzCoverage;
+    /** How many tools the server advertises. Schema Quality is a per-tool
+     *  rate, and clean tools have no findings — without the real count they
+     *  would be invisible and the server judged only on its worst tools. */
+    toolCount?: number;
+  } = {
     fuzzMeasured: true,
   }
 ): ConformanceReport {
   const metadata = scoreMetadata(server, capabilities);
-  const schema = scoreSchemaQuality(findings);
+  const schema = scoreSchemaQuality(findings, options.toolCount);
 
   // Fuzz may have been requested but produced no cases — e.g. after the
   // dry-run skip and maxTools cap, no tools were eligible. The behavioral

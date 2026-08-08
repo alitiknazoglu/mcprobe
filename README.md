@@ -359,7 +359,7 @@ Letter grades: A ≥ 90, B ≥ 75, C ≥ 60, D ≥ 40, F < 40.
 | Dimension | Always measured? | What it captures |
 | --- | --- | --- |
 | **Metadata & Documentation** | yes | Server identity (name, version), advertised capabilities, presence of `instructions` (+1 bonus). |
-| **Schema Quality** | yes | Subtractive: 1 per `error`, 0.5 per `warning`, 0.25 per `info` finding. |
+| **Schema Quality** | yes | Rate over **tools**: findings are weighted (1 per `error`, 0.5 per `warning`, 0.25 per `info`), summed per tool and capped at 2 each, then averaged across every tool the server advertises. A server isn't penalized for having more tools — 50 tools with one minor nit each score the same as 5. |
 | **Error Handling** | only with `fuzz: true` | Rate over **malformed** cases: `10 × (gracefully-rejected / total malformed)`. A silent accept (garbage let through) or a protocol crash both count as failed rejections. |
 | **Liveness & Performance** | only with `fuzz: true` | Rate over **valid** cases: `10 × (successful / total valid)`, minus 0.5 per 100ms that the valid-call p50 latency exceeds a 200ms target. |
 

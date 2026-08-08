@@ -332,7 +332,7 @@ server.tool(
         conn.capabilities,
         findings,
         fuzzResults,
-        { fuzzMeasured: fuzzEnabled, coverage: fuzzRun?.coverage }
+        { fuzzMeasured: fuzzEnabled, coverage: fuzzRun?.coverage, toolCount: conn.tools.length }
       );
 
       const markdown = renderReport(report);

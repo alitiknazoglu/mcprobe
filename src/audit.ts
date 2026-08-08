@@ -85,7 +85,7 @@ async function auditConnection(
       conn.capabilities,
       findings,
       fuzz,
-      { fuzzMeasured: Boolean(opts.fuzz), coverage }
+      { fuzzMeasured: Boolean(opts.fuzz), coverage, toolCount: conn.tools.length }
     );
   } finally {
     try {
