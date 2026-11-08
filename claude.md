@@ -15,9 +15,16 @@ This repository is the **open-source engine** (MIT). A separate, **private** rep
   from "mcprobe/audit"`.
 - **Via the CLI:** `mcprobe push` POSTs a report to the app's ingest endpoint.
 
-Keep this repo generic and product-agnostic: **no paywall, pricing, accounts,
-gallery, or other business logic here.** The app gates its Pro features (full
-reports, the gallery, 30 audits/day, local/stdio uploads) on its own side. The
+Keep this repo generic and product-agnostic: **no pricing, accounts, quotas,
+gallery, entitlement checks or other business logic here.** The app gates its
+Pro features (full reports, the gallery, 30 audits/day, local/stdio uploads) on
+its own side.
+
+One known exception: `softenReport()` in `src/audit.ts` is the free-tier
+*view* of a report (scores and counts, with the detail withheld). It is a pure
+trimming function with no entitlement logic — the app decides who sees which
+view — but it does encode the free/paid split. Don't add more of this; if it
+needs to change, consider moving it into the app. The
 `push` command stays generic — it uploads a report to a configurable endpoint
 with a bearer token, and the endpoint decides entitlements.
 
