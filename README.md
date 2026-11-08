@@ -617,8 +617,8 @@ that proves the build artifact loads over the real protocol.
 
 ## Limitations
 
-- **The four runtime dependencies are frozen.** `@modelcontextprotocol/sdk`,
-  `ajv`, `ajv-formats`, `zod`. The probe deliberately does not
+- **The three runtime dependencies are frozen.** `@modelcontextprotocol/sdk`,
+  `ajv`, `zod`. The probe deliberately does not
   depend on any CLI framework, HTTP server, or transport library
   beyond what the SDK already exposes. Adding a runtime dependency
   is an explicit change to the spec.

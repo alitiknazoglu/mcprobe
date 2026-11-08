@@ -55,7 +55,7 @@ boots the MCP server (the original behavior, so existing configs keep working).
 
 ```
 mcprobe/
-├── package.json          # ESM, type:module, exactly four runtime deps
+├── package.json          # ESM, type:module, exactly three runtime deps
 ├── tsconfig.json         # strict, ES2022, NodeNext, outDir: dist (src/ only)
 ├── tsconfig.test.json    # strict, includes src/ + tests/ + vitest.config.ts, noEmit
 ├── vitest.config.ts      # Node env, single-fork pool, 30s timeouts
@@ -139,15 +139,16 @@ touch the world):
 
 ## Runtime dependencies (frozen)
 
-Exactly four runtime packages. Do not add more without an explicit
+Exactly three runtime packages. Do not add more without an explicit
 acceptance-criteria change.
 
 | Package | Why |
 | --- | --- |
 | `@modelcontextprotocol/sdk` | MCP server (probe) and client (target) |
 | `ajv` | JSON-Schema compile for the lint rules |
-| `ajv-formats` | `date-time`, `uri`, etc. for Ajv |
-| `zod` | The probe's own tool input schemas |
+| `zod` | The probe's own tool input/output schemas (v4; the SDK accepts ^3.25 or ^4) |
+
+(`ajv-formats` was listed here but never imported — removed.)
 
 `devDependencies` are limited to `typescript` and `vitest`. Do not add
 test runners, assertion libraries, mocking frameworks, or HTTP clients
