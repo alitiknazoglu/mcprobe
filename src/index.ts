@@ -437,7 +437,7 @@ server.tool(
   async (args) => {
     const tool = "probe_disconnect";
     try {
-      const summary = getRegistry().disconnect(args.id);
+      const summary = await getRegistry().disconnect(args.id);
       return ok({
         removed: summary.removed,
         remaining: summary.remaining,
