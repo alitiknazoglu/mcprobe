@@ -10,9 +10,13 @@ inputs:
     description: "HTTP(S) URL of the MCP server to audit."
     required: true
   fuzz:
-    description: "Run behavioral fuzzing (call each tool with malformed input). true/false."
+    description: "Run behavioral fuzzing: really call each tool annotated readOnlyHint:true or destructiveHint:false with valid and malformed input. Off by default; only enable against a server you own. true/false."
     required: false
-    default: "true"
+    default: "false"
+  fuzz-unannotated:
+    description: "Also fuzz tools with no safety annotations (presumed destructive by the MCP spec; they are called for real). Implies fuzz. true/false."
+    required: false
+    default: "false"
   min-score:
     description: "Fail the job if the 0–100 score is below this. Empty = report only, never fail. (Grades: A≥90, B≥75, C≥60, D≥40.)"
     required: false
@@ -42,6 +46,7 @@ runs:
       env:
         MCPROBE_URL: ${{ inputs.url }}
         MCPROBE_FUZZ: ${{ inputs.fuzz }}
+        MCPROBE_FUZZ_UNANNOTATED: ${{ inputs.fuzz-unannotated }}
         MCPROBE_MIN: ${{ inputs.min-score }}
         # Read by the CLI directly; when set, we run `push` (upload to dashboard).
         MCPROBE_TOKEN: ${{ inputs.token }}
@@ -53,6 +58,7 @@ runs:
 
         FUZZ_FLAG=""
         [ "$MCPROBE_FUZZ" = "true" ] && FUZZ_FLAG="--fuzz"
+        [ "$MCPROBE_FUZZ_UNANNOTATED" = "true" ] && FUZZ_FLAG="--fuzz-unannotated"
 
         # Pro path: a token means `push` (audits AND uploads to mcprobe.org).
         # Free path: no token means `audit` (local-only). Both emit the same JSON.

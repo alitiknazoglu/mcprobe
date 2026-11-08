@@ -15,7 +15,10 @@
 // matches it. Exit 0 on success; non-zero on any failure.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const EXPECTED_DIMENSIONS = [
   "Metadata & Documentation",
@@ -38,6 +41,9 @@ const demoBin = new URL(
 const transport = new StdioClientTransport({
   command: "node",
   args: [probeBin],
+  // These scripts drive probe_connect over stdio, which the probe refuses
+  // unless the operator opts in (see src/connect-policy.ts).
+  env: { ...getDefaultEnvironment(), MCPROBE_ALLOW_STDIO: "*" },
   stderr: "inherit",
 });
 
@@ -75,7 +81,8 @@ try {
   // (2) Run probe_report with fuzz: true.
   const reportResult = await client.callTool({
     name: "probe_report",
-    arguments: { fuzz: true },
+    // The demo target declares no annotations, so opt in to fuzzing them.
+    arguments: { fuzz: true, fuzzUnannotated: true },
   });
   if (reportResult.isError) {
     fail(
@@ -133,9 +140,10 @@ try {
   if (!Array.isArray(cov.skippedDestructive) || !Array.isArray(cov.skippedOverCap)) {
     fail(`coverage skip lists must be arrays: ${JSON.stringify(cov)}`);
   }
-  if (cov.fuzzedTools + cov.skippedDestructive.length + cov.skippedOverCap.length !== cov.totalTools) {
+  const unannotated = cov.skippedUnannotated ?? [];
+  if (cov.fuzzedTools + cov.skippedDestructive.length + unannotated.length + cov.skippedOverCap.length !== cov.totalTools) {
     fail(
-      `coverage does not account for every tool: ${cov.fuzzedTools} + ${cov.skippedDestructive.length} + ${cov.skippedOverCap.length} != ${cov.totalTools}`
+      `coverage does not account for every tool: ${cov.fuzzedTools} + ${cov.skippedDestructive.length} + ${unannotated.length} + ${cov.skippedOverCap.length} != ${cov.totalTools}`
     );
   }
 

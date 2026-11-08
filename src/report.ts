@@ -70,7 +70,7 @@ function renderRecommendedFixes(report: ConformanceReport): string {
       a[0].localeCompare(b[0])
   );
   for (const [code, e] of sorted) {
-    items.push(`- **${e.severity}** ${e.hint} _(\`${code}\`: ${affected(e.where)})_`);
+    items.push(`- **${e.severity}** ${e.hint} _(\`${code}\`: ${mdText(affected(e.where))})_`);
   }
 
   // Behavioral fixes — only when fuzz ran and there are issues.
@@ -91,22 +91,22 @@ function renderRecommendedFixes(report: ConformanceReport): string {
     ];
     if (silentTools.length > 0) {
       items.push(
-        `- **behavioral** Validate inputs and reject unknown keys (e.g. a strict schema) so malformed arguments return a clear error instead of being silently accepted _(${affected(silentTools)})_`
+        `- **behavioral** Validate inputs and reject unknown keys (e.g. a strict schema) so malformed arguments return a clear error instead of being silently accepted _(${mdText(affected(silentTools))})_`
       );
     }
     if (emptyTools.length > 0) {
       items.push(
-        `- **behavioral** Return a result payload that confirms what happened on success (e.g. the created id, a count, or a status message) so an agent can tell a real success from a silent no-op — an empty success reads as "done" when nothing happened _(${affected(emptyTools)})_`
+        `- **behavioral** Return a result payload that confirms what happened on success (e.g. the created id, a count, or a status message) so an agent can tell a real success from a silent no-op — an empty success reads as "done" when nothing happened _(${mdText(affected(emptyTools))})_`
       );
     }
     if (schemaTools.length > 0) {
       items.push(
-        `- **behavioral** Make the success response honor the tool's declared outputSchema — return structuredContent that validates against it (or drop the schema if it's aspirational). An agent trusts the declared shape _(${affected(schemaTools)})_`
+        `- **behavioral** Make the success response honor the tool's declared outputSchema — return structuredContent that validates against it (or drop the schema if it's aspirational). An agent trusts the declared shape _(${mdText(affected(schemaTools))})_`
       );
     }
     if (crashTools.length > 0) {
       items.push(
-        `- **behavioral** Guard against bad input before it throws, so the call returns a tool error instead of crashing the connection _(${affected(crashTools)})_`
+        `- **behavioral** Guard against bad input before it throws, so the call returns a tool error instead of crashing the connection _(${mdText(affected(crashTools))})_`
       );
     }
   }
@@ -136,12 +136,12 @@ function renderHeader(report: ConformanceReport): string {
   lines.push(`# MCProbe conformance report`);
   lines.push("");
   lines.push(
-    `**Server:** \`${report.server.name}\` ${report.server.version}`
+    `**Server:** ${mdCode(report.server.name)} ${mdText(report.server.version)}`
   );
 
   if (report.server.instructions) {
     const snippet = truncate(report.server.instructions, 120);
-    lines.push(`**Instructions:** ${snippet}`);
+    lines.push(`**Instructions:** ${mdText(snippet)}`);
   }
 
   lines.push(`**Overall score:** ${report.overall} / 100`);
@@ -163,7 +163,13 @@ function renderCoverageLine(c: FuzzCoverage): string {
   const parts = [`fuzzed ${c.fuzzedTools} of ${c.totalTools} tool(s)`];
   if (c.skippedDestructive.length > 0) {
     parts.push(
-      `${c.skippedDestructive.length} skipped as destructive (${c.skippedDestructive.join(", ")})`
+      `${c.skippedDestructive.length} skipped as destructive (${mdText(c.skippedDestructive.join(", "))})`
+    );
+  }
+  const unannotated = c.skippedUnannotated ?? [];
+  if (unannotated.length > 0) {
+    parts.push(
+      `${unannotated.length} skipped as not annotated read-only/non-destructive (${mdText(unannotated.join(", "))}) — opt in with fuzzUnannotated / --fuzz-unannotated`
     );
   }
   if (c.skippedOverCap.length > 0) {
@@ -200,19 +206,19 @@ function renderCriticalLine(fuzz: FuzzResult[]): string {
   if (silentTools.size > 0) {
     // List the offending tools when there are only a few; otherwise the count.
     const names =
-      silentTools.size <= 4 ? ` (${[...silentTools].join(", ")})` : "";
+      silentTools.size <= 4 ? ` (${mdText([...silentTools].join(", "))})` : "";
     parts.push(
       `${silentTools.size} tool(s) silently accept malformed input${names}`
     );
   }
   if (emptyTools.size > 0) {
-    const names = emptyTools.size <= 4 ? ` (${[...emptyTools].join(", ")})` : "";
+    const names = emptyTools.size <= 4 ? ` (${mdText([...emptyTools].join(", "))})` : "";
     parts.push(
       `${emptyTools.size} tool(s) return an empty success on valid input — possible hallucinated success${names}`
     );
   }
   if (schemaTools.size > 0) {
-    const names = schemaTools.size <= 4 ? ` (${[...schemaTools].join(", ")})` : "";
+    const names = schemaTools.size <= 4 ? ` (${mdText([...schemaTools].join(", "))})` : "";
     parts.push(
       `${schemaTools.size} tool(s) return a success that violates their declared outputSchema${names}`
     );
@@ -243,7 +249,7 @@ function renderDimension(d: ConformanceReport["dimensions"][number]): string {
     lines.push(`### ${d.label}: not measured`);
 
     for (const r of d.reasons) {
-      lines.push(`- ${r}`);
+      lines.push(`- ${mdText(r)}`);
     }
 
     return lines.join("\n");
@@ -254,7 +260,7 @@ function renderDimension(d: ConformanceReport["dimensions"][number]): string {
   for (const r of d.reasons) {
     // Bullet; sub-bullets (lines starting with two spaces) are
     // preserved as-is so the call site can indent follow-up lines.
-    lines.push(`- ${r}`);
+    lines.push(`- ${mdText(r)}`);
   }
 
   return lines.join("\n");
@@ -338,12 +344,12 @@ function renderFuzzTable(fuzz: ConformanceReport["fuzz"]): string {
 
 function formatFinding(f: Finding): string {
   const where = f.location.param
-    ? `\`${f.location.tool ?? "?"}.${f.location.param}\``
+    ? mdCode(`${f.location.tool ?? "?"}.${f.location.param}`)
     : f.location.tool
-      ? `\`${f.location.tool}\``
+      ? mdCode(f.location.tool)
       : "(server-wide)";
 
-  return `- **${f.severity}** \`${f.code}\` on ${where} — ${f.message}`;
+  return `- **${f.severity}** \`${f.code}\` on ${where} — ${mdText(f.message)}`;
 }
 
 function formatFuzzRow(r: ConformanceReport["fuzz"][number]): string {
@@ -361,7 +367,7 @@ function formatFuzzRow(r: ConformanceReport["fuzz"][number]): string {
     note = "empty success — no content returned";
   }
 
-  return `| \`${r.name}\` | \`${r.case}\` | ${r.outcome} | ${silent} | ${r.latencyMs.toFixed(0)} | ${escapePipes(note)} |`;
+  return `| ${escapePipes(mdCode(r.name))} | ${escapePipes(mdCode(r.case))} | ${r.outcome} | ${silent} | ${r.latencyMs.toFixed(0)} | ${escapePipes(mdText(note))} |`;
 }
 
 // ---------------------------------------------------------------------------
@@ -397,5 +403,33 @@ function truncate(s: string, n: number): string {
 function escapePipes(s: string): string {
   return s
     .replace(/\s*\n+\s*/g, " ")
-    .replace(/\|/g, "\\|");
+    .replace(/(?<!\\)\|/g, "\\|");
+}
+
+/**
+ * Make target-supplied text (server name/version/instructions, tool and
+ * parameter names, error messages) safe to interpolate into inline Markdown.
+ * A hostile server could otherwise inject links, images, raw HTML, headings
+ * or table breaks into a report that people (or an agent) read and trust.
+ *
+ * Newlines are collapsed (no new blocks: headings, lists, fake sections), and
+ * the characters that build links, HTML, emphasis, code spans and tables are
+ * backslash-escaped. `_` is left alone: GFM ignores intraword underscores, and
+ * escaping every snake_case tool name would make the raw report unreadable.
+ * Exported for tests.
+ */
+export function mdText(s: string): string {
+  return String(s)
+    .replace(/\s*[\r\n]+\s*/g, " ")
+    .replace(/[\\`*\[\]<>|]/g, "\\$&");
+}
+
+/** Wrap target-supplied text in an inline code span that it cannot break out
+ *  of: the fence is one backtick longer than the longest run inside. */
+export function mdCode(s: string): string {
+  const flat = String(s).replace(/\s*[\r\n]+\s*/g, " ");
+  const longest = Math.max(0, ...(flat.match(/`+/g) ?? []).map((m) => m.length));
+  const fence = "`".repeat(longest + 1);
+  const pad = flat.startsWith("`") || flat.endsWith("`") ? " " : "";
+  return `${fence}${pad}${flat}${pad}${fence}`;
 }

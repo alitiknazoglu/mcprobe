@@ -369,7 +369,7 @@ export function buildReport(
   // dimensions can only be measured when at least one case actually ran.
   const fuzzRan = options.fuzzMeasured && fuzz.length > 0;
   const behavioralReason = options.fuzzMeasured
-    ? "fuzz ran but no tools were eligible to fuzz (see coverage)"
+    ? "fuzz ran but no tools were eligible to fuzz (see coverage; tools not annotated read-only or non-destructive need fuzzUnannotated / --fuzz-unannotated)"
     : "not measured — pass `fuzz: true` to evaluate this dimension";
 
   const errorHandling = fuzzRan

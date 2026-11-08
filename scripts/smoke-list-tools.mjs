@@ -11,7 +11,10 @@
 // failed assertion.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const CORE_TOOLS = [
   "probe_connect",
@@ -31,6 +34,9 @@ const probeBin = new URL("../dist/index.js", import.meta.url).pathname;
 const transport = new StdioClientTransport({
   command: "node",
   args: [probeBin],
+  // These scripts drive probe_connect over stdio, which the probe refuses
+  // unless the operator opts in (see src/connect-policy.ts).
+  env: { ...getDefaultEnvironment(), MCPROBE_ALLOW_STDIO: "*" },
   // Pipe probe stderr through to ours so the operator sees the
   // "[mcprobe] stdio server ready" line as it would in production.
   stderr: "inherit",

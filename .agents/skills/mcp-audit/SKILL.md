@@ -19,6 +19,10 @@ whenever the user wants to evaluate, test, compare, or debug an MCP server.
 **A. MCProbe is connected as an MCP server (you have `probe_*` tools).**
 Run the four core tools in order:
 1. `probe_connect` — dial the target: an HTTPS URL, or a stdio command.
+   stdio is refused unless the operator allowed that exact command line with
+   `MCPROBE_ALLOW_STDIO`, and loopback/private URLs unless
+   `MCPROBE_ALLOW_PRIVATE_URLS=1`. If you get that refusal, tell the user —
+   never try to work around it.
 2. `probe_report` — the one-shot audit: lints the schemas, fuzzes behavior, and
    returns the full report + 0–100 score. (Use `probe_lint` / `probe_fuzz`
    individually if you want just one phase.)
@@ -55,7 +59,9 @@ Three things to get right:
   the *server being audited*; `--token` authenticates to *mcprobe.org* for
   `push`. Passing the MCProbe token as `--bearer` would hand it to a third party.
 - **A stdio server takes credentials through its own environment**, not these
-  flags — the CLI rejects them for `--stdio` targets.
+  flags — the CLI rejects them for `--stdio` targets. The target does not
+  inherit the shell's environment: pass `--pass-env NAME` (forward a variable)
+  or `--env NAME=VALUE`.
 
 Servers behind a full OAuth login flow can't be audited yet; say so plainly
 rather than trying to synthesize a token.
@@ -64,9 +70,11 @@ rather than trying to synthesize a token.
 Fuzzing **calls each tool with malformed input** to test error handling and
 liveness. This is what catches the dangerous problems a linter can't: a tool
 that *silently accepts* garbage (so the agent trusts a wrong result) or one that
-*crashes the session*. It is **dry-run by default** — tools annotated
-`destructiveHint: true` are skipped unless you pass `--fuzz-destructive`, so a
-normal run is safe even on servers you don't own. **Only fuzz servers you're
+*crashes the session*. Fuzzing **calls each tool for real**, so by default it
+only touches tools annotated `readOnlyHint: true` or `destructiveHint: false`.
+`--fuzz-unannotated` adds tools with no safety annotations and
+`--fuzz-destructive` adds everything — ask the user before using either, and
+never against a server holding real data or money. **Only fuzz servers you're
 allowed to test.**
 
 ## How to read the result

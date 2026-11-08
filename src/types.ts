@@ -81,6 +81,11 @@ export interface FuzzCoverage {
   /** Tools skipped because they are annotated `destructiveHint: true` and
    *  `fuzzDestructive` was not set (the dry-run safety default). */
   skippedDestructive: string[];
+  /** Tools skipped because they don't declare themselves safe (no
+   *  `readOnlyHint: true` / `destructiveHint: false`) and `fuzzUnannotated`
+   *  was not set. Optional so reports produced before this field existed
+   *  still render. */
+  skippedUnannotated?: string[];
   /** Tools skipped because they fell outside the `maxTools` cap. */
   skippedOverCap: string[];
 }

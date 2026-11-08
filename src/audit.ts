@@ -26,8 +26,12 @@ export interface AuditUrlOptions {
   /** Run the behavioral fuzzer (calls the target's tools). Default false —
    *  a static, read-only audit, which is the safe default for a public box. */
   fuzz?: boolean;
-  /** Also fuzz tools annotated destructiveHint:true. Default false. */
+  /** Also fuzz tools annotated destructiveHint:true. Default false.
+   *  Implies fuzzUnannotated. */
   fuzzDestructive?: boolean;
+  /** Also fuzz tools that don't declare readOnlyHint:true or
+   *  destructiveHint:false. Default false — they are called for real. */
+  fuzzUnannotated?: boolean;
   /** Cap on tools fuzzed. Default 10. */
   maxTools?: number;
   /** Custom fetch for the HTTP transport (ignored by auditStdio). An embedder
@@ -47,8 +51,12 @@ export interface AuditUrlOptions {
 export interface AuditStdioOptions extends AuditUrlOptions {
   /** Arguments passed to the command (e.g. ["my-server"] for `npx`). */
   args?: string[];
-  /** Extra environment variables for the spawned process. */
+  /** Environment variables for the spawned process. The parent environment is
+   *  NOT inherited — the target gets a minimal base (PATH, HOME, ...) plus
+   *  these and any names listed in `passEnv`. */
   env?: Record<string, string>;
+  /** Parent-process environment variable names to forward to the target. */
+  passEnv?: string[];
   /** Working directory for the spawned process. */
   cwd?: string;
 }
@@ -71,6 +79,7 @@ async function auditConnection(
       const run = await runFuzz(conn, conn.tools, {
         maxTools: opts.maxTools,
         fuzzDestructive: opts.fuzzDestructive,
+        fuzzUnannotated: opts.fuzzUnannotated,
       });
       fuzz = run.results;
       coverage = run.coverage;
@@ -124,6 +133,7 @@ export async function auditStdio(
     command,
     args: opts.args,
     env: opts.env,
+    passEnv: opts.passEnv,
     cwd: opts.cwd,
   });
   return auditConnection(conn, opts);

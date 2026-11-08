@@ -18,7 +18,10 @@
 // failure.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const SILENT_TOOLS = new Set(["greet", "divide", "set_mode"]);
 
@@ -36,6 +39,9 @@ const demoBin = new URL(
 const transport = new StdioClientTransport({
   command: "node",
   args: [probeBin],
+  // These scripts drive probe_connect over stdio, which the probe refuses
+  // unless the operator opts in (see src/connect-policy.ts).
+  env: { ...getDefaultEnvironment(), MCPROBE_ALLOW_STDIO: "*" },
   stderr: "inherit",
 });
 
@@ -73,7 +79,8 @@ try {
   // (2) Run probe_fuzz.
   const fuzzResult = await client.callTool({
     name: "probe_fuzz",
-    arguments: {},
+    // The demo target declares no annotations, so opt in to fuzzing them.
+    arguments: { fuzzUnannotated: true },
   });
   if (fuzzResult.isError) {
     fail(

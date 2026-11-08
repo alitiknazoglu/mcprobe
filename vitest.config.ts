@@ -18,9 +18,7 @@ export default defineConfig({
     // Deterministic, fast — one file at a time so a failing test
     // produces a clean stack trace.
     pool: "forks",
-    poolOptions: {
-      forks: { singleFork: true },
-    },
+    fileParallelism: false,
     reporters: ["default"],
     testTimeout: 30_000,
     hookTimeout: 30_000,

@@ -15,9 +15,16 @@ This repository is the **open-source engine** (MIT). A separate, **private** rep
   from "mcprobe/audit"`.
 - **Via the CLI:** `mcprobe push` POSTs a report to the app's ingest endpoint.
 
-Keep this repo generic and product-agnostic: **no paywall, pricing, accounts,
-gallery, or other business logic here.** The app gates its Pro features (full
-reports, the gallery, 30 audits/day, local/stdio uploads) on its own side. The
+Keep this repo generic and product-agnostic: **no pricing, accounts, quotas,
+gallery, entitlement checks or other business logic here.** The app gates its
+Pro features (full reports, the gallery, 30 audits/day, local/stdio uploads) on
+its own side.
+
+One known exception: `softenReport()` in `src/audit.ts` is the free-tier
+*view* of a report (scores and counts, with the detail withheld). It is a pure
+trimming function with no entitlement logic — the app decides who sees which
+view — but it does encode the free/paid split. Don't add more of this; if it
+needs to change, consider moving it into the app. The
 `push` command stays generic — it uploads a report to a configurable endpoint
 with a bearer token, and the endpoint decides entitlements.
 
@@ -55,7 +62,7 @@ boots the MCP server (the original behavior, so existing configs keep working).
 
 ```
 mcprobe/
-├── package.json          # ESM, type:module, exactly four runtime deps
+├── package.json          # ESM, type:module, exactly three runtime deps
 ├── tsconfig.json         # strict, ES2022, NodeNext, outDir: dist (src/ only)
 ├── tsconfig.test.json    # strict, includes src/ + tests/ + vitest.config.ts, noEmit
 ├── vitest.config.ts      # Node env, single-fork pool, 30s timeouts
@@ -112,7 +119,8 @@ touch the world):
 | `src/fuzz.ts` (generator + summarizer) | yes | none |
 | `src/conformance.ts` | yes | none |
 | `src/report.ts` | yes | none |
-| `src/target-client.ts` | no | spawns / dials MCP transports |
+| `src/connect-policy.ts` | no | DNS lookups only — the `probe_connect` gate (stdio allowlist, SSRF guard). Never bypass it in `index.ts`. |
+| `src/target-client.ts` | no | spawns / dials MCP transports; a spawned target gets a minimal env, never `process.env` |
 | `src/index.ts` | no | dispatches CLI vs server; owns the stdio transport, registers tools |
 | `src/cli.ts` | no | `mcprobe audit`/`push`; prints to stdout, `push` POSTs the report to an ingest endpoint |
 | `src/audit.ts` | no | `auditUrl()` dials an http target, `auditStdio()` spawns a stdio target; `softenReport()` is pure. Library entry (exported as `mcprobe/audit`). |
@@ -138,15 +146,16 @@ touch the world):
 
 ## Runtime dependencies (frozen)
 
-Exactly four runtime packages. Do not add more without an explicit
+Exactly three runtime packages. Do not add more without an explicit
 acceptance-criteria change.
 
 | Package | Why |
 | --- | --- |
 | `@modelcontextprotocol/sdk` | MCP server (probe) and client (target) |
 | `ajv` | JSON-Schema compile for the lint rules |
-| `ajv-formats` | `date-time`, `uri`, etc. for Ajv |
-| `zod` | The probe's own tool input schemas |
+| `zod` | The probe's own tool input/output schemas (v4; the SDK accepts ^3.25 or ^4) |
+
+(`ajv-formats` was listed here but never imported — removed.)
 
 `devDependencies` are limited to `typescript` and `vitest`. Do not add
 test runners, assertion libraries, mocking frameworks, or HTTP clients
@@ -238,11 +247,13 @@ lint, transport, stdio, capability, severity, finding.
 
 ## Fuzzing and scoring
 
-- **Dry-run default.** `runFuzz` (src/fuzz.ts) skips tools annotated
-  `destructiveHint: true` unless `fuzzDestructive` is set, and applies the
-  `maxTools` cap to the remaining eligible tools. It returns
+- **Dry-run default.** `runFuzz` (src/fuzz.ts) only fuzzes tools that declare
+  themselves safe (`readOnlyHint: true` or `destructiveHint: false`; see
+  `isDeclaredSafe`). Unannotated tools need `fuzzUnannotated`, tools annotated
+  `destructiveHint: true` need `fuzzDestructive` (which implies the former). The
+  `maxTools` cap applies to the remaining eligible tools. It returns
   `{ results, coverage }`; `coverage` (totalTools / fuzzedTools /
-  skippedDestructive / skippedOverCap) is threaded into the report and
+  skippedDestructive / skippedUnannotated / skippedOverCap) is threaded into the report and
   rendered as the header **Coverage** line. The header also carries a
   **critical-issues callout** (`renderCriticalLine` in src/report.ts) —
   a flag listing silent-accepting tools + crash count, *not* a second

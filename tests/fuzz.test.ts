@@ -11,6 +11,7 @@
 // the smoke scripts (smoke-fuzz.mjs, smoke-report.mjs) so we don't
 // pay the live-MCP cost in unit tests.
 
+import { Ajv } from "ajv";
 import { describe, it, expect } from "vitest";
 import {
   GARBAGE_KEY,
@@ -21,6 +22,7 @@ import {
   runOneCaseForTest,
   runFuzz,
   isDestructive,
+  isDeclaredSafe,
   isEmptyResult,
   makeOutputCheck,
   looksLikeOutputSchemaError,
@@ -244,6 +246,77 @@ describe("fuzz — no-schema trio", () => {
 // ---------------------------------------------------------------------------
 // sampleValidValue — for unknown types, returns null
 // ---------------------------------------------------------------------------
+
+describe("fuzz — sampleValidValue honors constraints", () => {
+  const v = (schema: Record<string, unknown>, name = "p") => sampleValidValue(schema, name);
+
+  it("uses a sample for common string formats", () => {
+    expect(v({ type: "string", format: "email" })).toBe("mcprobe@example.com");
+    expect(v({ type: "string", format: "uri" })).toMatch(/^https:\/\//);
+    expect(v({ type: "string", format: "uuid" })).toMatch(/^[0-9a-f-]{36}$/);
+    expect(v({ type: "string", format: "date-time" })).toBe("2024-01-01T00:00:00Z");
+  });
+
+  it("finds a value matching common address / id patterns", () => {
+    const evm = "^0x[a-fA-F0-9]{40}$";
+    expect(v({ type: "string", pattern: evm }, "to")).toMatch(new RegExp(evm));
+    const near = "^[a-z0-9_-]+\\.(near|testnet)$";
+    expect(v({ type: "string", pattern: near }, "account")).toMatch(new RegExp(near));
+    expect(v({ type: "string", pattern: "^\\d+$" })).toMatch(/^\d+$/);
+  });
+
+  it("ignores an invalid pattern instead of throwing", () => {
+    expect(v({ type: "string", pattern: "([" })).toBe("mcprobe-p");
+  });
+
+  it("respects minLength / maxLength", () => {
+    expect((v({ type: "string", minLength: 20 }) as string).length).toBe(20);
+    expect(v({ type: "string", maxLength: 3 })).toBe("mcp");
+  });
+
+  it("respects numeric bounds and multipleOf", () => {
+    expect(v({ type: "number", minimum: 10 })).toBe(10);
+    expect(v({ type: "number", maximum: 0.5 })).toBe(0.5);
+    expect(v({ type: "integer", exclusiveMinimum: 1 })).toBe(2);
+    expect(v({ type: "number", exclusiveMinimum: 1 })).toBeGreaterThan(1);
+    expect(v({ type: "integer", minimum: 0, exclusiveMinimum: true })).toBe(1); // draft-04
+    expect(v({ type: "integer", minimum: 3, multipleOf: 5 })).toBe(5);
+    expect(v({ type: "integer", minimum: -10, maximum: -5 })).toBe(-5);
+  });
+
+  it("fills minItems and required object properties", () => {
+    expect(v({ type: "array", minItems: 2, items: { type: "integer", minimum: 7 } })).toEqual([7, 7]);
+    expect(
+      v({
+        type: "object",
+        properties: { id: { type: "string", format: "uuid" }, note: { type: "string" } },
+        required: ["id"],
+      })
+    ).toEqual({ id: "00000000-0000-4000-8000-000000000000" });
+  });
+
+  it("samples the first non-null anyOf / oneOf branch", () => {
+    expect(v({ anyOf: [{ type: "null" }, { type: "integer", minimum: 4 }] })).toBe(4);
+    expect(v({ oneOf: [{ type: "string", format: "email" }] })).toBe("mcprobe@example.com");
+  });
+
+  it("produces a valid case that passes the schema (pattern/bounds/required)", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        to: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$" },
+        amount: { type: "number", exclusiveMinimum: 0, maximum: 100 },
+        memo: { type: "string", minLength: 1, maxLength: 64 },
+        tags: { type: "array", minItems: 1, items: { type: "string" } },
+      },
+      required: ["to", "amount", "tags"],
+      additionalProperties: false,
+    };
+    const valid = generateCases(schema).find((c) => c.label === "valid")!;
+    const ok = new Ajv({ strict: false }).validate(schema, valid.args);
+    expect(ok).toBe(true);
+  });
+});
 
 describe("fuzz — sampleValidValue", () => {
   it("returns the first enum value when the prop has an enum", () => {
@@ -509,6 +582,8 @@ function tool(name: string, annotations?: Record<string, unknown>): ToolSummary 
   return { name, description: "a tool", inputSchema: SIMPLE_SCHEMA, annotations };
 }
 
+const READ_ONLY = (name: string) => tool(name, { readOnlyHint: true });
+
 /** A fake connection — never dereferenced because we always pass options.call. */
 const FAKE_CONN = {} as unknown as Connection;
 
@@ -531,12 +606,82 @@ describe("isDestructive", () => {
   });
 });
 
+describe("isDeclaredSafe", () => {
+  it("is true only for readOnlyHint:true or destructiveHint:false", () => {
+    expect(isDeclaredSafe(tool("a", { readOnlyHint: true }))).toBe(true);
+    expect(isDeclaredSafe(tool("b", { destructiveHint: false }))).toBe(true);
+    expect(isDeclaredSafe(tool("c"))).toBe(false);
+    expect(isDeclaredSafe(tool("d", {}))).toBe(false);
+    expect(isDeclaredSafe(tool("e", { title: "x", openWorldHint: true }))).toBe(false);
+    expect(isDeclaredSafe(tool("f", { readOnlyHint: false }))).toBe(false);
+    // Contradictory: explicit destructive wins.
+    expect(isDeclaredSafe(tool("g", { readOnlyHint: true, destructiveHint: true }))).toBe(false);
+  });
+});
+
+describe("runFuzz — unannotated tools", () => {
+  it("does not call tools without safety annotations by default", async () => {
+    const rec = recordingCall();
+    const { results, coverage } = await runFuzz(
+      FAKE_CONN,
+      [READ_ONLY("ro"), tool("bare"), tool("titled", { title: "Send payment" })],
+      { call: rec.call }
+    );
+    expect([...rec.calledTools()]).toEqual(["ro"]);
+    expect(results.every((r) => r.name === "ro")).toBe(true);
+    expect(coverage.fuzzedTools).toBe(1);
+    expect(coverage.skippedUnannotated).toEqual(["bare", "titled"]);
+    expect(coverage.skippedDestructive).toEqual([]);
+  });
+
+  it("calls them when fuzzUnannotated is set, but still skips destructive ones", async () => {
+    const rec = recordingCall();
+    const { coverage } = await runFuzz(
+      FAKE_CONN,
+      [tool("bare"), tool("danger", { destructiveHint: true })],
+      { call: rec.call, fuzzUnannotated: true }
+    );
+    expect(rec.calledTools().has("bare")).toBe(true);
+    expect(rec.calledTools().has("danger")).toBe(false);
+    expect(coverage.skippedUnannotated).toEqual([]);
+    expect(coverage.skippedDestructive).toEqual(["danger"]);
+  });
+
+  it("fuzzDestructive implies fuzzUnannotated", async () => {
+    const rec = recordingCall();
+    const { coverage } = await runFuzz(FAKE_CONN, [tool("bare")], {
+      call: rec.call,
+      fuzzDestructive: true,
+    });
+    expect(rec.calledTools().has("bare")).toBe(true);
+    expect(coverage.skippedUnannotated).toEqual([]);
+  });
+
+  it("warns on stderr when it does call unannotated tools", async () => {
+    const rec = recordingCall();
+    const lines: string[] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => void lines.push(a.join(" "));
+    try {
+      await runFuzz(FAKE_CONN, [tool("bare"), READ_ONLY("ro")], {
+        call: rec.call,
+        fuzzUnannotated: true,
+      });
+    } finally {
+      console.error = orig;
+    }
+    const warning = lines.find((l) => l.includes("WARNING"));
+    expect(warning).toMatch(/bare/);
+    expect(warning).not.toMatch(/\bro\b/);
+  });
+});
+
 describe("runFuzz — dry-run + coverage", () => {
   it("skips destructive tools by default and records them in coverage", async () => {
     const rec = recordingCall();
     const { results, coverage } = await runFuzz(
       FAKE_CONN,
-      [tool("safe"), tool("danger", { destructiveHint: true })],
+      [tool("safe", { readOnlyHint: true }), tool("danger", { destructiveHint: true })],
       { call: rec.call }
     );
     expect(rec.calledTools().has("safe")).toBe(true);
@@ -564,7 +709,7 @@ describe("runFuzz — dry-run + coverage", () => {
     const rec = recordingCall();
     const { coverage } = await runFuzz(
       FAKE_CONN,
-      [tool("a"), tool("b"), tool("c")],
+      [READ_ONLY("a"), READ_ONLY("b"), READ_ONLY("c")],
       { call: rec.call, maxTools: 2 }
     );
     expect(coverage.fuzzedTools).toBe(2);

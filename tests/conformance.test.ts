@@ -212,6 +212,30 @@ describe("renderReport coverage line", () => {
     expect(md).toMatch(/skipped as destructive \(danger\)/);
   });
 
+  it("names tools skipped for lacking safety annotations, and how to opt in", () => {
+    const report = buildReport(
+      { name: "s", version: "1.0.0" },
+      { tools: {} },
+      [],
+      [validOk()],
+      {
+        fuzzMeasured: true,
+        coverage: { ...COVERAGE, skippedDestructive: [], skippedUnannotated: ["send_payment"] },
+      }
+    );
+    const md = renderReport(report);
+    expect(md).toMatch(/1 skipped as not annotated read-only\/non-destructive \(send_payment\)/);
+    expect(md).toMatch(/--fuzz-unannotated/);
+  });
+
+  it("renders a stored report from before skippedUnannotated existed", () => {
+    const report = buildReport({ name: "s", version: "1.0.0" }, { tools: {} }, [], [validOk()], {
+      fuzzMeasured: true,
+      coverage: COVERAGE, // no skippedUnannotated key
+    });
+    expect(() => renderReport(report)).not.toThrow();
+  });
+
   it("omits the coverage line for a static audit (no coverage)", () => {
     const report = buildReport(
       { name: "s", version: "1.0.0" },

@@ -10,10 +10,13 @@
 // JSON-RPC transport and must never be interleaved with application logs.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import type { Transport, FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { ToolSummary } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -23,7 +26,13 @@ import type { ToolSummary } from "./types.js";
 export interface ConnectStdioOptions {
   command: string;
   args?: string[];
+  /** Environment variables set on the spawned process, on top of a minimal
+   *  safe base (see `buildStdioEnv`). The parent environment is NOT inherited. */
   env?: Record<string, string>;
+  /** Names of parent-process environment variables to forward to the target
+   *  (e.g. `["BYLINE_API_KEY"]`). Lets a caller hand a credential to the
+   *  target without inheriting everything else in the parent env. */
+  passEnv?: string[];
   cwd?: string;
 }
 
@@ -226,27 +235,27 @@ export class ConnectionRegistry {
 
   /** Close one or every connection. Returns a tiny summary so the
    *  handler can echo something useful. */
-  disconnect(id?: string): { removed: number; remaining: number } {
+  async disconnect(id?: string): Promise<{ removed: number; remaining: number }> {
     if (id === undefined) {
-      const removed = this.connections.size;
-      for (const c of this.connections.values()) {
-        this.closeQuietly(c);
-      }
+      const all = Array.from(this.connections.values());
+      // Drop them from the registry first so a concurrent get() can't hand
+      // out a connection that is mid-close.
       this.connections.clear();
       this.defaultId = null;
-      return { removed, remaining: 0 };
+      await Promise.all(all.map((c) => this.closeQuietly(c)));
+      return { removed: all.length, remaining: 0 };
     }
     const target = this.connections.get(id);
     if (!target) {
       return { removed: 0, remaining: this.connections.size };
     }
-    this.closeQuietly(target);
     this.connections.delete(id);
     if (this.defaultId === id) {
       // Fall back to any other live connection, or null when none.
       const next = this.connections.keys().next();
       this.defaultId = next.done ? null : next.value;
     }
+    await this.closeQuietly(target);
     return { removed: 1, remaining: this.connections.size };
   }
 
@@ -261,9 +270,12 @@ export class ConnectionRegistry {
     return this.defaultId;
   }
 
-  private closeQuietly(c: Connection): void {
+  /** Close a connection, awaiting the transport shutdown (for stdio, the
+   *  child process exit) so callers don't leak processes or race a reconnect.
+   *  Both a synchronous throw and a rejected promise are logged, not raised. */
+  private async closeQuietly(c: Connection): Promise<void> {
     try {
-      c.client.close();
+      await c.client.close();
     } catch (err) {
       console.error(
         `[mcprobe] warning: error closing connection ${c.id}:`,
@@ -345,19 +357,31 @@ function toToolSummary(raw: unknown): ToolSummary {
   };
 }
 
-/** Inherit the parent process env, then layer caller-supplied keys on
- *  top so callers can override `PATH` etc. explicitly. */
-function mergedStdioEnv(env?: Record<string, string>): Record<string, string> {
-  const merged: Record<string, string> = { ...process.env } as Record<
-    string,
-    string
-  >;
-  if (env) {
-    for (const [k, v] of Object.entries(env)) {
-      merged[k] = v;
-    }
+/**
+ * Build the environment for a spawned stdio target.
+ *
+ * The target is untrusted code, so it must not see the probe's own secrets
+ * (`MCPROBE_TOKEN`, `MCPROBE_TARGET_TOKEN`, CI tokens, cloud credentials...).
+ * Start from the MCP SDK's minimal default environment (`PATH`, `HOME`,
+ * `USER`, `SHELL`, `TERM`, ... — enough to launch `node`/`npx`), then add only
+ * the parent variables the caller names in `passEnv`, then the explicit `env`.
+ *
+ * Exported for unit testing.
+ */
+export function buildStdioEnv(
+  env?: Record<string, string>,
+  passEnv?: string[],
+  parent: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
+  const out: Record<string, string> = { ...getDefaultEnvironment() };
+  for (const name of passEnv ?? []) {
+    const value = parent[name];
+    if (typeof value === "string") out[name] = value;
   }
-  return merged;
+  if (env) {
+    for (const [k, v] of Object.entries(env)) out[k] = v;
+  }
+  return out;
 }
 
 async function finalizeConnection(
@@ -429,7 +453,7 @@ export async function connectStdio(
   const transport = new StdioClientTransport({
     command: opts.command,
     args: opts.args ?? [],
-    env: mergedStdioEnv(opts.env),
+    env: buildStdioEnv(opts.env, opts.passEnv),
     cwd: opts.cwd,
     // Inherit stderr by default so the operator sees target log
     // output intermixed with the probe's own stderr stream.
@@ -443,43 +467,72 @@ export async function connectStdio(
   return finalizeConnection(client, "stdio");
 }
 
+/** HTTP statuses that mean "this endpoint doesn't speak streamable HTTP" —
+ *  the MCP spec's cue to retry with the legacy HTTP+SSE transport. An auth
+ *  failure (401/403) or a 5xx is a real error and is not retried. */
+const LEGACY_FALLBACK_STATUSES = new Set([400, 404, 405]);
+
+/** True when a streamable-HTTP connect failure should be retried over the
+ *  legacy SSE transport. Exported for tests. */
+export function shouldFallBackToSse(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "number" && LEGACY_FALLBACK_STATUSES.has(code);
+}
+
 export async function connectHttp(opts: ConnectHttpOptions): Promise<Connection> {
   if (!opts.url || typeof opts.url !== "string") {
     throw new Error("connectHttp: 'url' is required");
   }
-  const transport: Transport = createHttpTransport(opts);
-  const client = makeClient();
-  await client.connect(transport);
-  console.error(`[mcprobe] connected (http): ${redactUrl(opts.url)}`);
-  return finalizeConnection(client, "http");
-}
+  const transportOpts = httpTransportOptions(opts);
+  const url = new URL(opts.url);
 
-function createHttpTransport(opts: ConnectHttpOptions): Transport {
-  // Pass the embedder's custom fetch and any auth headers through to the
-  // transport. Both HTTP transports merge `requestInit.headers` into every
-  // request they make — for SSE that includes the event-stream GET, not just
-  // the POSTs — so one option covers the whole session.
-  const headers = opts.headers ? sanitizeHeaders(opts.headers) : undefined;
-  const transportOpts =
-    opts.fetch || headers
-      ? {
-          ...(opts.fetch ? { fetch: opts.fetch } : {}),
-          ...(headers ? { requestInit: { headers } } : {}),
-        }
-      : undefined;
-  // Prefer the modern streamable HTTP transport. The spec tells us to
-  // fall back to SSE if the resolved SDK version doesn't expose it.
-  if (opts.prefer !== "sse") {
+  if (opts.prefer === "sse") {
+    const client = makeClient();
+    await client.connect(new SSEClientTransport(url, transportOpts));
+    console.error(`[mcprobe] connected (http+sse): ${redactUrl(opts.url)}`);
+    return finalizeConnection(client, "http");
+  }
+
+  // Prefer streamable HTTP. Per the spec's backwards-compatibility rules, if
+  // the initialize POST is rejected with 400/404/405 the server may be a
+  // legacy HTTP+SSE server, so retry with that transport. Constructing a
+  // transport never fails — the error only surfaces from connect().
+  const client = makeClient();
+  try {
+    await client.connect(new StreamableHTTPClientTransport(url, transportOpts));
+    console.error(`[mcprobe] connected (http): ${redactUrl(opts.url)}`);
+    return finalizeConnection(client, "http");
+  } catch (err) {
+    if (!shouldFallBackToSse(err)) throw err;
+    console.error(
+      `[mcprobe] streamable-http rejected by ${redactUrl(opts.url)} (${(err as Error).message}); retrying with legacy SSE`
+    );
+    const sseClient = makeClient();
     try {
-      return new StreamableHTTPClientTransport(new URL(opts.url), transportOpts);
-    } catch (err) {
-      console.error(
-        `[mcprobe] streamable-http transport failed to construct for ${redactUrl(opts.url)}, falling back to SSE:`,
-        (err as Error).message
+      await sseClient.connect(new SSEClientTransport(url, transportOpts));
+    } catch (sseErr) {
+      throw new Error(
+        `streamable HTTP failed (${(err as Error).message}) and legacy SSE failed (${(sseErr as Error).message})`
       );
     }
+    console.error(`[mcprobe] connected (http+sse): ${redactUrl(opts.url)}`);
+    return finalizeConnection(sseClient, "http");
   }
-  return new SSEClientTransport(new URL(opts.url), transportOpts);
+}
+
+/** Shared options for both HTTP transports. Passes the embedder's custom
+ *  fetch and any auth headers through. Both transports merge
+ *  `requestInit.headers` into every request they make — for SSE that includes
+ *  the event-stream GET, not just the POSTs — so one option covers the whole
+ *  session. */
+function httpTransportOptions(opts: ConnectHttpOptions) {
+  const headers = opts.headers ? sanitizeHeaders(opts.headers) : undefined;
+  return opts.fetch || headers
+    ? {
+        ...(opts.fetch ? { fetch: opts.fetch } : {}),
+        ...(headers ? { requestInit: { headers } } : {}),
+      }
+    : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -537,7 +590,7 @@ export function setRegistryForTest(reg: ConnectionRegistry): void {
   activeRegistry = reg;
 }
 
-export function resetRegistryForTest(): void {
+export async function resetRegistryForTest(): Promise<void> {
   activeRegistry = defaultRegistry;
-  defaultRegistry.disconnect();
+  await defaultRegistry.disconnect();
 }

@@ -44,6 +44,12 @@ export interface RunFuzzOptions {
    *  the dry-run safety guard — so fuzzing a server you don't control can't
    *  trigger a real destructive action. */
   fuzzDestructive?: boolean;
+  /** Also fuzz tools that don't declare themselves safe — no
+   *  `readOnlyHint: true` and no `destructiveHint: false`. Off by default:
+   *  per the MCP spec an unannotated tool is presumed destructive, and every
+   *  fuzzed tool is really called (the `valid` case executes for real).
+   *  Implied by `fuzzDestructive`. */
+  fuzzUnannotated?: boolean;
   /** Override the call function (used by tests). */
   call?: CallFn;
 }
@@ -209,6 +215,16 @@ export function isDestructive(tool: ToolSummary): boolean {
   return tool.annotations?.destructiveHint === true;
 }
 
+/** True when the tool's annotations say calling it is safe: `readOnlyHint:
+ *  true` or `destructiveHint: false`. The MCP spec defaults are readOnlyHint
+ *  false and destructiveHint true, so a tool without either is presumed
+ *  destructive — we can't tell a `get_balance` from a `send_payment`. */
+export function isDeclaredSafe(tool: ToolSummary): boolean {
+  if (isDestructive(tool)) return false;
+  const a = tool.annotations;
+  return a?.readOnlyHint === true || a?.destructiveHint === false;
+}
+
 /** Run the generated cases against the target and classify each outcome.
  *  Pure orchestration: it does not write to any global state; the
  *  caller (the handler in index.ts) threads the result through
@@ -225,18 +241,34 @@ export async function runFuzz(
 ): Promise<FuzzRun> {
   const maxTools = options.maxTools ?? 10;
   const fuzzDestructive = options.fuzzDestructive ?? false;
+  const fuzzUnannotated = fuzzDestructive || (options.fuzzUnannotated ?? false);
   const call: CallFn = options.call
     ? options.call
     : (name, args) => defaultCallTool(connection, name, args);
 
-  // Dry-run safety: unless explicitly opted in, never invoke a tool the
-  // target marks destructive. Eligible tools are then capped by maxTools.
+  // Dry-run safety: unless explicitly opted in, only invoke tools the target
+  // declares safe. Explicitly destructive tools need fuzzDestructive; tools
+  // that say nothing need fuzzUnannotated. Eligible tools are then capped.
   const destructive = tools.filter(isDestructive);
-  const eligible = fuzzDestructive
-    ? tools
-    : tools.filter((t) => !isDestructive(t));
+  const unannotated = tools.filter((t) => !isDestructive(t) && !isDeclaredSafe(t));
+  const eligible = tools.filter((t) => {
+    if (isDestructive(t)) return fuzzDestructive;
+    if (!isDeclaredSafe(t)) return fuzzUnannotated;
+    return true;
+  });
   const fuzzed = eligible.slice(0, maxTools);
   const overCap = eligible.slice(maxTools);
+
+  // Calling a tool that never said it was safe is a real side effect on a
+  // real server. Say so loudly (stderr: stdout may be the JSON-RPC stream).
+  const riskyFuzzed = fuzzed.filter((t) => !isDeclaredSafe(t)).map((t) => t.name);
+  if (riskyFuzzed.length > 0) {
+    console.error(
+      `[mcprobe] WARNING: fuzzing ${riskyFuzzed.length} tool(s) not annotated read-only or ` +
+        `non-destructive — each is called for real, including with a "valid" input: ` +
+        riskyFuzzed.join(", ")
+    );
+  }
 
   const results: FuzzResult[] = [];
   for (const tool of fuzzed) {
@@ -252,6 +284,7 @@ export async function runFuzz(
     totalTools: tools.length,
     fuzzedTools: fuzzed.length,
     skippedDestructive: fuzzDestructive ? [] : destructive.map((t) => t.name),
+    skippedUnannotated: fuzzUnannotated ? [] : unannotated.map((t) => t.name),
     skippedOverCap: overCap.map((t) => t.name),
   };
 
@@ -477,12 +510,18 @@ function extractErrorText(content: unknown): string | undefined {
 // ---------------------------------------------------------------------------
 
 /** Best-effort "valid" value for one property. Tries enum, const,
- *  examples, default, then falls back to a type-appropriate primitive
- *  using the schema's `type`. Untyped properties get null as a neutral
- *  value (the case will still be exercised via extra_garbage). */
+ *  examples, default, then builds a type-appropriate value that honors the
+ *  schema's constraints — string `format` / `pattern` / length, numeric
+ *  bounds and `multipleOf`, array `minItems`, an object's required
+ *  properties. A naive value ("mcprobe-to" for an address, 1 for an amount
+ *  with minimum 10) would be rejected by any well-validated tool, and the
+ *  rejection would wrongly count against Liveness. Untyped properties get
+ *  null as a neutral value (the case will still be exercised via
+ *  extra_garbage). */
 export function sampleValidValue(
   propSchema: unknown,
-  name: string
+  name: string,
+  depth = 0
 ): unknown {
   const s = (propSchema ?? {}) as Record<string, unknown>;
 
@@ -498,20 +537,43 @@ export function sampleValidValue(
   if (s.default !== undefined) {
     return s.default;
   }
+  // anyOf / oneOf: sample the first branch that isn't just `null`.
+  for (const key of ["anyOf", "oneOf"] as const) {
+    const branches = s[key];
+    if (Array.isArray(branches) && branches.length > 0 && depth < 6) {
+      const pick =
+        branches.find(
+          (b) => (b as Record<string, unknown> | null)?.type !== "null"
+        ) ?? branches[0];
+      return sampleValidValue(pick, name, depth + 1);
+    }
+  }
 
   const t = primaryType(s);
   switch (t) {
     case "string":
-      return `mcprobe-${name}`;
+      return sampleString(s, name);
     case "number":
     case "integer":
-      return 1;
+      return sampleNumber(s, t === "integer");
     case "boolean":
       return true;
-    case "array":
-      return [];
-    case "object":
-      return {};
+    case "array": {
+      const min = typeof s.minItems === "number" ? s.minItems : 0;
+      if (min <= 0 || depth >= 6) return [];
+      const item = sampleValidValue(s.items, name, depth + 1);
+      return Array.from({ length: Math.min(min, 10) }, () => item);
+    }
+    case "object": {
+      const props = (s.properties ?? {}) as Record<string, unknown>;
+      const required = Array.isArray(s.required) ? (s.required as string[]) : [];
+      const out: Record<string, unknown> = {};
+      if (depth >= 6) return out;
+      for (const key of required) {
+        out[key] = sampleValidValue(props[key], key, depth + 1);
+      }
+      return out;
+    }
     case "null":
       return null;
     default:
@@ -519,6 +581,107 @@ export function sampleValidValue(
       // garbage, missing required) still apply.
       return null;
   }
+}
+
+/** Sample strings for common JSON Schema `format`s. */
+const FORMAT_SAMPLES: Record<string, string> = {
+  email: "mcprobe@example.com",
+  "idn-email": "mcprobe@example.com",
+  uri: "https://example.com/mcprobe",
+  url: "https://example.com/mcprobe",
+  iri: "https://example.com/mcprobe",
+  "uri-reference": "https://example.com/mcprobe",
+  "iri-reference": "https://example.com/mcprobe",
+  uuid: "00000000-0000-4000-8000-000000000000",
+  "date-time": "2024-01-01T00:00:00Z",
+  date: "2024-01-01",
+  time: "00:00:00Z",
+  duration: "P1D",
+  ipv4: "192.0.2.1",
+  ipv6: "2001:db8::1",
+  hostname: "example.com",
+  "idn-hostname": "example.com",
+  "json-pointer": "/mcprobe",
+  regex: "^mcprobe$",
+};
+
+/** Candidate strings tried against a `pattern`, covering shapes tools often
+ *  require: ids, numbers, hex, EVM/NEAR/Solana-style addresses, hashes. */
+function patternCandidates(name: string): string[] {
+  return [
+    `mcprobe-${name}`,
+    "mcprobe",
+    "1",
+    "100",
+    "1.5",
+    "0.01",
+    "abc",
+    "ABC",
+    "a",
+    "user_123",
+    "deadbeef",
+    "0x" + "0".repeat(39) + "1",
+    "0x" + "0".repeat(63) + "1",
+    "alice.near",
+    "alice.testnet",
+    "0".repeat(64),
+    "11111111111111111111111111111111",
+    ...Object.values(FORMAT_SAMPLES),
+  ];
+}
+
+function fitLength(v: string, s: Record<string, unknown>): string {
+  const min = typeof s.minLength === "number" ? s.minLength : 0;
+  const max = typeof s.maxLength === "number" ? s.maxLength : Infinity;
+  let out = v;
+  if (out.length < min) out = out + "x".repeat(min - out.length);
+  if (out.length > max) out = out.slice(0, Math.max(0, max));
+  return out;
+}
+
+function sampleString(s: Record<string, unknown>, name: string): string {
+  const format = typeof s.format === "string" ? FORMAT_SAMPLES[s.format] : undefined;
+  if (typeof s.pattern === "string") {
+    let re: RegExp | null = null;
+    try {
+      re = new RegExp(s.pattern, "u");
+    } catch {
+      re = null; // invalid pattern: ignore it rather than crash the fuzz run
+    }
+    if (re) {
+      const candidates = format ? [format, ...patternCandidates(name)] : patternCandidates(name);
+      for (const c of candidates) {
+        const v = fitLength(c, s);
+        if (re.test(v)) return v;
+      }
+    }
+  }
+  return fitLength(format ?? `mcprobe-${name}`, s);
+}
+
+function sampleNumber(s: Record<string, unknown>, integer: boolean): number {
+  const num = (k: string) => (typeof s[k] === "number" ? (s[k] as number) : undefined);
+  const step = integer ? 1 : 0.5;
+  // Draft-04 uses boolean exclusiveMinimum/Maximum next to minimum/maximum.
+  let lo = num("minimum");
+  let hi = num("maximum");
+  if (s.exclusiveMinimum === true && lo !== undefined) lo += step;
+  if (s.exclusiveMaximum === true && hi !== undefined) hi -= step;
+  const exMin = num("exclusiveMinimum");
+  const exMax = num("exclusiveMaximum");
+  if (exMin !== undefined) lo = Math.max(lo ?? -Infinity, exMin + step);
+  if (exMax !== undefined) hi = Math.min(hi ?? Infinity, exMax - step);
+
+  let v = 1;
+  if (lo !== undefined && v < lo) v = lo;
+  if (hi !== undefined && v > hi) v = hi;
+  if (integer) v = lo !== undefined && Math.ceil(v) <= (hi ?? Infinity) ? Math.ceil(v) : Math.floor(v);
+  const mult = num("multipleOf");
+  if (mult !== undefined && mult > 0) {
+    const up = Math.ceil(v / mult) * mult;
+    v = hi === undefined || up <= hi ? up : Math.floor(v / mult) * mult;
+  }
+  return v;
 }
 
 /** Produce a value whose primitive type is intentionally not the

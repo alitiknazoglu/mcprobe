@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { safeList } from "../src/target-client.js";
+import { safeList, ConnectionRegistry, type Connection } from "../src/target-client.js";
 
 /** Build a stub Client whose list* methods are overridden per test. */
 function fakeClient(overrides: Partial<Record<string, unknown>>): Client {
@@ -53,5 +53,45 @@ describe("safeList", () => {
       },
     });
     await expect(safeList(client, "resources")).resolves.toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ConnectionRegistry.disconnect awaits client.close()
+// ---------------------------------------------------------------------------
+
+function fakeConn(id: string, close: () => Promise<void>): Connection {
+  return {
+    id,
+    transportKind: "stdio",
+    client: { close } as unknown as Client,
+    serverInfo: { name: "x", version: "0" },
+    capabilities: {},
+    counts: { tools: 0, resources: 0, prompts: 0 },
+    tools: [],
+  };
+}
+
+describe("ConnectionRegistry.disconnect", () => {
+  it("waits for each client.close() before resolving", async () => {
+    let closed = 0;
+    const slowClose = () =>
+      new Promise<void>((r) => setTimeout(() => ((closed += 1), r()), 20));
+    const reg = new ConnectionRegistry();
+    reg.add(fakeConn("a", slowClose));
+    reg.add(fakeConn("b", slowClose));
+    const one = await reg.disconnect("a");
+    expect(one).toEqual({ removed: 1, remaining: 1 });
+    expect(closed).toBe(1);
+    expect(reg.defaultConnectionId).toBe("b");
+    await reg.disconnect();
+    expect(closed).toBe(2);
+    expect(reg.list()).toEqual([]);
+  });
+
+  it("swallows a rejected close() instead of throwing", async () => {
+    const reg = new ConnectionRegistry();
+    reg.add(fakeConn("a", () => Promise.reject(new Error("already gone"))));
+    await expect(reg.disconnect()).resolves.toEqual({ removed: 1, remaining: 0 });
   });
 });
