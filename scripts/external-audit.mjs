@@ -17,7 +17,10 @@
 // plan permits this degraded path for AC-7 only.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 import { writeFile, mkdir, stat, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -124,6 +127,9 @@ async function main() {
   const probeTransport = new StdioClientTransport({
     command: "node",
     args: [probeBin],
+    // These scripts drive probe_connect over stdio, which the probe refuses
+    // unless the operator opts in (see src/connect-policy.ts).
+    env: { ...getDefaultEnvironment(), MCPROBE_ALLOW_STDIO: "*" },
     stderr: "inherit",
   });
   const probe = new Client(

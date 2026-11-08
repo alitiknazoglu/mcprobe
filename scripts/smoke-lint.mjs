@@ -15,7 +15,10 @@
 // Exit 0 on success; non-zero with a clear stderr message on any failure.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const REQUIRED_CODES = [
   "tool.missing_description",
@@ -46,6 +49,9 @@ const demoBin = new URL(
 const transport = new StdioClientTransport({
   command: "node",
   args: [probeBin],
+  // These scripts drive probe_connect over stdio, which the probe refuses
+  // unless the operator opts in (see src/connect-policy.ts).
+  env: { ...getDefaultEnvironment(), MCPROBE_ALLOW_STDIO: "*" },
   stderr: "inherit",
 });
 

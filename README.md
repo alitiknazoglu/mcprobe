@@ -109,6 +109,21 @@ built `dist/index.js`):
 }
 ```
 
+To let the host audit **local stdio** servers too, allow the exact command
+lines in the probe's own env (see [Security](#security) for why this is opt-in):
+
+```json
+"mcprobe": {
+  "command": "node",
+  "args": ["/absolute/path/to/mcprobe/dist/index.js"],
+  "env": {
+    "MCPROBE_ALLOW_STDIO": "node /absolute/path/to/my-server/dist/index.js",
+    "MCPROBE_PASS_ENV": "MY_SERVER_API_KEY",
+    "MY_SERVER_API_KEY": "..."
+  }
+}
+```
+
 Then ask in plain English:
 
 > Use mcprobe to audit `https://docs.base.org/mcp` over http — connect,
@@ -144,7 +159,13 @@ sent on every request to it — so only point them at a server you trust. Set
 history. (Don't confuse these with `push --token`, which authenticates you to
 *MCProbe*; passing that as `--bearer` would hand your MCProbe key to a third
 party.) A stdio server takes its credentials through its own environment
-instead.
+instead — and it does **not** inherit your shell's environment (so
+`MCPROBE_TOKEN` and CI secrets never reach it). Forward what it needs with
+`--pass-env NAME` (repeatable) or set it with `--env NAME=VALUE`:
+
+```bash
+node dist/index.js audit --stdio "node ./server.js" --pass-env MY_API_KEY --fuzz
+```
 
 (After `npm install -g .` or `npm link`, the command is just `mcprobe audit …`.)
 
@@ -225,6 +246,37 @@ cp -r .agents/skills/mcp-audit /path/to/your/project/.agents/skills/
 
 It's a single `SKILL.md` — the same file works in either location.
 
+## Security
+
+MCProbe connects to servers you point it at and, with `--fuzz`, calls their
+tools. Treat both directions as untrusted.
+
+**`probe_connect` is driven by an agent, so it is gated.** Whoever drives the
+MCP server — usually an LLM, possibly acting on a prompt injection in a page or
+a tool result — chooses the command, its arguments, its environment and the
+URL. Ungated, that is arbitrary code execution and an SSRF primitive. So:
+
+| Env (set in the probe's MCP config) | Effect |
+| --- | --- |
+| `MCPROBE_ALLOW_STDIO` unset | `probe_connect` refuses `transport: "stdio"`. |
+| `MCPROBE_ALLOW_STDIO="node /abs/server.js; npx -y @acme/srv"` | Only these exact command lines (command + args, `;`-separated). The agent may not set code-loading env vars (`PATH`, `NODE_OPTIONS`, `LD_PRELOAD`, `DYLD_*`, `PYTHONPATH`, ...). |
+| `MCPROBE_ALLOW_STDIO="*"` | Any command, any env. Only for a probe no untrusted text can reach. |
+| `MCPROBE_PASS_ENV="A,B"` | Forward these variables from the probe's env to spawned targets (so the agent never handles the secret). |
+| `MCPROBE_ALLOW_PRIVATE_URLS=1` | Allow `http` targets on loopback / private networks (local dev servers). Off by default. Link-local and cloud-metadata addresses (`169.254.0.0/16`, `fe80::/10`, `metadata.google.internal`) are always refused. Hostnames are resolved and every address checked; each request is re-checked and redirects are refused. |
+
+Allowlisting an interpreter with an open-ended argument (`npx -y <anything>`)
+is only as safe as that exact line — the allowlist is matched on the full
+command line, so prefer an absolute path to the server's entry point.
+
+The CLI and the `mcprobe/audit` library are not gated: there, the person
+running the command is the operator.
+
+**Spawned targets get a minimal environment.** A stdio target sees only `PATH`,
+`HOME`, `USER`, `SHELL`, `TERM` (the MCP SDK's default set) plus what you pass
+explicitly (`--env`, `--pass-env`, `env`/`passEnv` in the library,
+`MCPROBE_PASS_ENV` for the server). Your `MCPROBE_TOKEN`, `MCPROBE_TARGET_TOKEN`
+and CI secrets never reach it.
+
 ## The six `probe_*` tools
 
 MCProbe registers four core tools and two optional helpers. The core
@@ -259,6 +311,10 @@ the streamable HTTP transport, with SSE fallback). For `stdio`,
 `command` is required; for `http`, `url` is required. The target's
 `initialize` handshake is run synchronously, the server's identity
 and capabilities are cached, and a stable `connectionId` is returned.
+
+Both transports are gated by the operator — see [Security](#security):
+stdio needs `MCPROBE_ALLOW_STDIO`, and loopback/private URLs need
+`MCPROBE_ALLOW_PRIVATE_URLS=1`.
 
 ### `probe_lint`
 
@@ -422,7 +478,8 @@ JSON tool calls, and the rendered report), see
 [examples/agent-usage.md](examples/agent-usage.md).
 
 The probe is not coupled to the demo target. To audit any other
-MCP server, swap the `command`/`args` in `probe_connect`:
+MCP server, swap the `command`/`args` in `probe_connect` (and allow that
+command line in the probe's `MCPROBE_ALLOW_STDIO`):
 
 ```jsonc
 // tool call: probe_connect
@@ -528,6 +585,7 @@ server to its caller, a client to its target.
 | Module | Role | I/O? |
 | --- | --- | --- |
 | `src/types.ts` | Shared `Finding`, `FuzzResult`, `DimensionScore`, `ConformanceReport` types. | none |
+| `src/connect-policy.ts` | Operator gate for `probe_connect`: stdio allowlist (`MCPROBE_ALLOW_STDIO`), SSRF guard for URLs. | DNS lookups only |
 | `src/target-client.ts` | Outbound MCP client, `ConnectionRegistry`, `callTool` wrapper that catches transport errors. | yes — spawns / dials |
 | `src/schema-lint.ts` | The 12 lint rules. Pure: no I/O, deterministic ordering. | none |
 | `src/fuzz.ts` | Case generator + runner + `summarizeFuzz` histogram. Generator is pure; runner threads through a caller-supplied `call` fn so it stays unit-testable. | none on the generator; the runner calls the target |

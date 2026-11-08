@@ -112,7 +112,8 @@ touch the world):
 | `src/fuzz.ts` (generator + summarizer) | yes | none |
 | `src/conformance.ts` | yes | none |
 | `src/report.ts` | yes | none |
-| `src/target-client.ts` | no | spawns / dials MCP transports |
+| `src/connect-policy.ts` | no | DNS lookups only — the `probe_connect` gate (stdio allowlist, SSRF guard). Never bypass it in `index.ts`. |
+| `src/target-client.ts` | no | spawns / dials MCP transports; a spawned target gets a minimal env, never `process.env` |
 | `src/index.ts` | no | dispatches CLI vs server; owns the stdio transport, registers tools |
 | `src/cli.ts` | no | `mcprobe audit`/`push`; prints to stdout, `push` POSTs the report to an ingest endpoint |
 | `src/audit.ts` | no | `auditUrl()` dials an http target, `auditStdio()` spawns a stdio target; `softenReport()` is pure. Library entry (exported as `mcprobe/audit`). |

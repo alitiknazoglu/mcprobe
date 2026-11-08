@@ -23,6 +23,10 @@ it's safe to wire into my agent."
 { "transport": "stdio", "command": "node", "args": ["./some-server.js"] }
 ```
 
+(The probe only spawns this because its operator allowed that command line —
+`MCPROBE_ALLOW_STDIO="node ./some-server.js"` in the probe's MCP config. See
+[Security](../README.md#security).)
+
 result:
 
 ```json

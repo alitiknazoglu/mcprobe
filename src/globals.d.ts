@@ -37,6 +37,11 @@ declare var console: {
 interface URL {
   toString(): string;
   href: string;
+  protocol: string;
+  hostname: string;
+  host: string;
+  username: string;
+  password: string;
 }
 declare var URL: { new (url: string): URL };
 
@@ -72,4 +77,15 @@ declare module "node:url" {
 declare module "node:path" {
   export function dirname(path: string): string;
   export function resolve(...paths: string[]): string;
+}
+
+declare module "node:net" {
+  export function isIP(input: string): 0 | 4 | 6;
+}
+
+declare module "node:dns/promises" {
+  export function lookup(
+    hostname: string,
+    options: { all: true }
+  ): Promise<Array<{ address: string; family: number }>>;
 }

@@ -21,6 +21,14 @@ import {
   getRegistry,
   type ConnectOutcome,
 } from "./target-client.js";
+import {
+  assertPublicUrl,
+  checkStdioAllowed,
+  guardedFetch,
+  readPassEnv,
+  readStdioPolicy,
+  readUrlPolicy,
+} from "./connect-policy.js";
 import { lintTools } from "./schema-lint.js";
 import { runFuzz, summarizeFuzz } from "./fuzz.js";
 import { buildReport } from "./conformance.js";
@@ -108,7 +116,7 @@ const server = new McpServer(
 // probe_connect — open a connection to a target. Substantive body: AC-3.
 server.tool(
   "probe_connect",
-  "Open a connection to an MCP target server (stdio or HTTP) and return a connectionId plus the server's name, version, capabilities, and counts.",
+  "Open a connection to an MCP target server (stdio or HTTP) and return a connectionId plus the server's name, version, capabilities, and counts. stdio spawns a local process and is refused unless the operator allowed that command line via MCPROBE_ALLOW_STDIO; http URLs pointing at loopback/private/metadata addresses are refused unless MCPROBE_ALLOW_PRIVATE_URLS=1.",
   {
     transport: z.enum(["stdio", "http"]).describe(
       "Transport to use. 'stdio' spawns a child process; 'http' speaks the streamable HTTP transport."
@@ -146,10 +154,19 @@ server.tool(
         if (!args.command) {
           return fail(tool, new Error("'command' is required when transport='stdio'"));
         }
+        // Operator gate: an agent-supplied command line is code execution.
+        const denied = checkStdioAllowed(
+          readStdioPolicy(),
+          args.command,
+          args.args,
+          args.env
+        );
+        if (denied) return fail(tool, new Error(denied));
         const conn = await connectStdio({
           command: args.command,
           args: args.args,
           env: args.env,
+          passEnv: readPassEnv(),
         });
         getRegistry().add(conn);
         const outcome: ConnectOutcome = {
@@ -166,7 +183,11 @@ server.tool(
       if (!args.url) {
         return fail(tool, new Error("'url' is required when transport='http'"));
       }
-      const conn = await connectHttp({ url: args.url });
+      // SSRF guard: refuse loopback/private/metadata targets unless allowed,
+      // and re-check every request (no redirects) through the guarded fetch.
+      const urlPolicy = readUrlPolicy();
+      await assertPublicUrl(args.url, urlPolicy);
+      const conn = await connectHttp({ url: args.url, fetch: guardedFetch(urlPolicy) });
       getRegistry().add(conn);
       const outcome: ConnectOutcome = {
         connectionId: conn.id,
