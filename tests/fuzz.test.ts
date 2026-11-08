@@ -11,6 +11,7 @@
 // the smoke scripts (smoke-fuzz.mjs, smoke-report.mjs) so we don't
 // pay the live-MCP cost in unit tests.
 
+import { Ajv } from "ajv";
 import { describe, it, expect } from "vitest";
 import {
   GARBAGE_KEY,
@@ -245,6 +246,77 @@ describe("fuzz — no-schema trio", () => {
 // ---------------------------------------------------------------------------
 // sampleValidValue — for unknown types, returns null
 // ---------------------------------------------------------------------------
+
+describe("fuzz — sampleValidValue honors constraints", () => {
+  const v = (schema: Record<string, unknown>, name = "p") => sampleValidValue(schema, name);
+
+  it("uses a sample for common string formats", () => {
+    expect(v({ type: "string", format: "email" })).toBe("mcprobe@example.com");
+    expect(v({ type: "string", format: "uri" })).toMatch(/^https:\/\//);
+    expect(v({ type: "string", format: "uuid" })).toMatch(/^[0-9a-f-]{36}$/);
+    expect(v({ type: "string", format: "date-time" })).toBe("2024-01-01T00:00:00Z");
+  });
+
+  it("finds a value matching common address / id patterns", () => {
+    const evm = "^0x[a-fA-F0-9]{40}$";
+    expect(v({ type: "string", pattern: evm }, "to")).toMatch(new RegExp(evm));
+    const near = "^[a-z0-9_-]+\\.(near|testnet)$";
+    expect(v({ type: "string", pattern: near }, "account")).toMatch(new RegExp(near));
+    expect(v({ type: "string", pattern: "^\\d+$" })).toMatch(/^\d+$/);
+  });
+
+  it("ignores an invalid pattern instead of throwing", () => {
+    expect(v({ type: "string", pattern: "([" })).toBe("mcprobe-p");
+  });
+
+  it("respects minLength / maxLength", () => {
+    expect((v({ type: "string", minLength: 20 }) as string).length).toBe(20);
+    expect(v({ type: "string", maxLength: 3 })).toBe("mcp");
+  });
+
+  it("respects numeric bounds and multipleOf", () => {
+    expect(v({ type: "number", minimum: 10 })).toBe(10);
+    expect(v({ type: "number", maximum: 0.5 })).toBe(0.5);
+    expect(v({ type: "integer", exclusiveMinimum: 1 })).toBe(2);
+    expect(v({ type: "number", exclusiveMinimum: 1 })).toBeGreaterThan(1);
+    expect(v({ type: "integer", minimum: 0, exclusiveMinimum: true })).toBe(1); // draft-04
+    expect(v({ type: "integer", minimum: 3, multipleOf: 5 })).toBe(5);
+    expect(v({ type: "integer", minimum: -10, maximum: -5 })).toBe(-5);
+  });
+
+  it("fills minItems and required object properties", () => {
+    expect(v({ type: "array", minItems: 2, items: { type: "integer", minimum: 7 } })).toEqual([7, 7]);
+    expect(
+      v({
+        type: "object",
+        properties: { id: { type: "string", format: "uuid" }, note: { type: "string" } },
+        required: ["id"],
+      })
+    ).toEqual({ id: "00000000-0000-4000-8000-000000000000" });
+  });
+
+  it("samples the first non-null anyOf / oneOf branch", () => {
+    expect(v({ anyOf: [{ type: "null" }, { type: "integer", minimum: 4 }] })).toBe(4);
+    expect(v({ oneOf: [{ type: "string", format: "email" }] })).toBe("mcprobe@example.com");
+  });
+
+  it("produces a valid case that passes the schema (pattern/bounds/required)", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        to: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$" },
+        amount: { type: "number", exclusiveMinimum: 0, maximum: 100 },
+        memo: { type: "string", minLength: 1, maxLength: 64 },
+        tags: { type: "array", minItems: 1, items: { type: "string" } },
+      },
+      required: ["to", "amount", "tags"],
+      additionalProperties: false,
+    };
+    const valid = generateCases(schema).find((c) => c.label === "valid")!;
+    const ok = new Ajv({ strict: false }).validate(schema, valid.args);
+    expect(ok).toBe(true);
+  });
+});
 
 describe("fuzz — sampleValidValue", () => {
   it("returns the first enum value when the prop has an enum", () => {

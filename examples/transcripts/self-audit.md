@@ -6,7 +6,7 @@ This transcript is the AC-8 **self-audit**: a second copy of `dist/index.js` was
 **Host probe:** first copy of `/Users/probablynothing/Desktop/mcprobe/dist/index.js`
 **Target handshake:** `mcprobe` 0.1.0 (tools=6, resources=0, prompts=0)
 **Target capabilities:** tools
-**Audit timestamp (UTC):** 2026-11-08T07:47:32.116Z
+**Audit timestamp (UTC):** 2026-11-08T07:50:50.498Z
 **Static rollup (gating):** 95/100, grade **A**
 **Behavioral rollup (informational):** 72/100, grade **C**
 
@@ -29,10 +29,10 @@ This transcript is the AC-8 **self-audit**: a second copy of `dist/index.js` was
 -   schema.no_required: 5
 
 ### Error Handling: not measured
-- not measured — pass `fuzz: true` to evaluate this dimension
+- not measured — pass \`fuzz: true\` to evaluate this dimension
 
 ### Liveness & Performance: not measured
-- not measured — pass `fuzz: true` to evaluate this dimension
+- not measured — pass \`fuzz: true\` to evaluate this dimension
 
 ## Findings summary
 
@@ -108,12 +108,12 @@ The canonical self-audit score above uses the spec's measured-only rollup (stati
 
 | Tool | Case | Outcome | Silent | Latency (ms) | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `probe_lint` | `valid` | toolError | no | 2 | [probe_lint] connection 'mcprobe-connectionId' not found |
-| `probe_lint` | `wrong_type:connectionId` | toolError | no | 1 | MCP error -32602: Input validation error: Invalid arguments… |
-| `probe_lint` | `extra_garbage` | toolError | no | 0 | [probe_lint] connection 'mcprobe-connectionId' not found |
-| `probe_list` | `valid` | toolError | no | 0 | [probe_list] connection 'mcprobe-connectionId' not found |
+| `probe_lint` | `valid` | toolError | no | 2 | \[probe_lint\] connection 'mcprobe-connectionId' not found |
+| `probe_lint` | `wrong_type:connectionId` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
+| `probe_lint` | `extra_garbage` | toolError | no | 0 | \[probe_lint\] connection 'mcprobe-connectionId' not found |
+| `probe_list` | `valid` | toolError | no | 0 | \[probe_list\] connection 'mcprobe-connectionId' not found |
 | `probe_list` | `wrong_type:connectionId` | toolError | no | 0 | MCP error -32602: Input validation error: Invalid arguments… |
-| `probe_list` | `extra_garbage` | toolError | no | 0 | [probe_list] connection 'mcprobe-connectionId' not found |
+| `probe_list` | `extra_garbage` | toolError | no | 0 | \[probe_list\] connection 'mcprobe-connectionId' not found |
 
 ## Recommended fixes
 
@@ -124,4 +124,4 @@ Address these to raise the score, worst first:
 ---
 
 *Self-audit script: `scripts/self-audit.mjs`*
-*Audit timestamp (UTC): 2026-11-08T07:47:32.116Z*
+*Audit timestamp (UTC): 2026-11-08T07:50:50.498Z*
