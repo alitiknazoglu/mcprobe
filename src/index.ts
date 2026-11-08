@@ -127,7 +127,7 @@ server.tool(
       .record(z.string(), z.string())
       .optional()
       .describe(
-        "stdio: extra environment variables layered on top of the parent process env."
+        "stdio: environment variables for the spawned process. The probe's own environment is NOT inherited; the target gets a minimal base (PATH, HOME, ...) plus these."
       ),
     url: z
       .string()

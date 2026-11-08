@@ -47,8 +47,12 @@ export interface AuditUrlOptions {
 export interface AuditStdioOptions extends AuditUrlOptions {
   /** Arguments passed to the command (e.g. ["my-server"] for `npx`). */
   args?: string[];
-  /** Extra environment variables for the spawned process. */
+  /** Environment variables for the spawned process. The parent environment is
+   *  NOT inherited — the target gets a minimal base (PATH, HOME, ...) plus
+   *  these and any names listed in `passEnv`. */
   env?: Record<string, string>;
+  /** Parent-process environment variable names to forward to the target. */
+  passEnv?: string[];
   /** Working directory for the spawned process. */
   cwd?: string;
 }
@@ -124,6 +128,7 @@ export async function auditStdio(
     command,
     args: opts.args,
     env: opts.env,
+    passEnv: opts.passEnv,
     cwd: opts.cwd,
   });
   return auditConnection(conn, opts);

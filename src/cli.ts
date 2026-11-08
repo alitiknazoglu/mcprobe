@@ -33,6 +33,19 @@ interface CliArgs {
    *  authenticates us to the ingest endpoint. Keeping these separate matters:
    *  handing an MCProbe token to a third-party target would leak it. */
   headers?: Record<string, string>;
+  /** `--env NAME=VALUE` — set on a stdio target's environment. */
+  env?: Record<string, string>;
+  /** `--pass-env NAME` — forward a variable from this process to a stdio target. */
+  passEnv?: string[];
+}
+
+/** Parse a `--env NAME=VALUE` argument. */
+function parseEnvArg(raw: string | undefined): [string, string] {
+  const at = raw?.indexOf("=") ?? -1;
+  if (!raw || at <= 0) {
+    throw new Error(`--env expects NAME=VALUE (got: ${raw ?? "nothing"})`);
+  }
+  return [raw.slice(0, at), raw.slice(at + 1)];
 }
 
 /** Parse a `--header "Name: Value"` argument. */
@@ -63,6 +76,13 @@ function parseArgs(rest: string[]): CliArgs {
     } else if (a === "--header") {
       const [name, value] = parseHeaderArg(rest[++i]);
       (out.headers ??= {})[name] = value;
+    } else if (a === "--env") {
+      const [name, value] = parseEnvArg(rest[++i]);
+      (out.env ??= {})[name] = value;
+    } else if (a === "--pass-env") {
+      const name = rest[++i];
+      if (!name) throw new Error("--pass-env expects a variable name");
+      (out.passEnv ??= []).push(name);
     } else if (!a.startsWith("-") && !out.url) out.url = a; // positional URL
   }
   // Env fallback keeps the credential out of shell history. Explicit flags win.
@@ -84,7 +104,12 @@ async function runAudit(args: CliArgs): Promise<ConformanceReport> {
     const parts = args.stdio.trim().split(/\s+/).filter(Boolean);
     const command = parts[0];
     if (!command) throw new Error('--stdio needs a command, e.g. --stdio "npx my-server"');
-    return auditStdio(command, { ...opts, args: parts.slice(1) });
+    return auditStdio(command, {
+      ...opts,
+      args: parts.slice(1),
+      env: args.env,
+      passEnv: args.passEnv,
+    });
   }
   if (args.url) return auditUrl(args.url, { ...opts, headers: args.headers });
   throw new Error(
@@ -204,12 +229,18 @@ Flags:
   --stdio "<command>"   audit a local stdio server instead of a URL
   --bearer <token>      credential for the TARGET server (sends Authorization: Bearer)
   --header "N: V"       arbitrary header for the TARGET server (repeatable)
+  --env NAME=VALUE      (stdio) set a variable on the target's environment (repeatable)
+  --pass-env NAME       (stdio) forward NAME from this shell to the target (repeatable)
   --token <key>         (push) bearer token for the MCProbe ingest endpoint
   --to <url>            (push) ingest endpoint (default ${DEFAULT_ENDPOINT})
 
   Note: --bearer/--header authenticate you to the server being audited;
   --token authenticates you to MCProbe. Never pass your MCProbe token as
   --bearer — it would be sent to the audited server.
+
+  A stdio target does NOT inherit this shell's environment — it gets only
+  PATH/HOME/USER/SHELL/TERM plus what you pass with --env / --pass-env, so
+  MCPROBE_TOKEN and CI secrets never reach the audited process.
 
 Env: MCPROBE_TOKEN (ingest), MCPROBE_TARGET_TOKEN (target server), MCPROBE_API
 `

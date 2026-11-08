@@ -10,7 +10,10 @@
 // JSON-RPC transport and must never be interleaved with application logs.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  StdioClientTransport,
+  getDefaultEnvironment,
+} from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { Transport, FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -23,7 +26,13 @@ import type { ToolSummary } from "./types.js";
 export interface ConnectStdioOptions {
   command: string;
   args?: string[];
+  /** Environment variables set on the spawned process, on top of a minimal
+   *  safe base (see `buildStdioEnv`). The parent environment is NOT inherited. */
   env?: Record<string, string>;
+  /** Names of parent-process environment variables to forward to the target
+   *  (e.g. `["BYLINE_API_KEY"]`). Lets a caller hand a credential to the
+   *  target without inheriting everything else in the parent env. */
+  passEnv?: string[];
   cwd?: string;
 }
 
@@ -345,19 +354,31 @@ function toToolSummary(raw: unknown): ToolSummary {
   };
 }
 
-/** Inherit the parent process env, then layer caller-supplied keys on
- *  top so callers can override `PATH` etc. explicitly. */
-function mergedStdioEnv(env?: Record<string, string>): Record<string, string> {
-  const merged: Record<string, string> = { ...process.env } as Record<
-    string,
-    string
-  >;
-  if (env) {
-    for (const [k, v] of Object.entries(env)) {
-      merged[k] = v;
-    }
+/**
+ * Build the environment for a spawned stdio target.
+ *
+ * The target is untrusted code, so it must not see the probe's own secrets
+ * (`MCPROBE_TOKEN`, `MCPROBE_TARGET_TOKEN`, CI tokens, cloud credentials...).
+ * Start from the MCP SDK's minimal default environment (`PATH`, `HOME`,
+ * `USER`, `SHELL`, `TERM`, ... — enough to launch `node`/`npx`), then add only
+ * the parent variables the caller names in `passEnv`, then the explicit `env`.
+ *
+ * Exported for unit testing.
+ */
+export function buildStdioEnv(
+  env?: Record<string, string>,
+  passEnv?: string[],
+  parent: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
+  const out: Record<string, string> = { ...getDefaultEnvironment() };
+  for (const name of passEnv ?? []) {
+    const value = parent[name];
+    if (typeof value === "string") out[name] = value;
   }
-  return merged;
+  if (env) {
+    for (const [k, v] of Object.entries(env)) out[k] = v;
+  }
+  return out;
 }
 
 async function finalizeConnection(
@@ -429,7 +450,7 @@ export async function connectStdio(
   const transport = new StdioClientTransport({
     command: opts.command,
     args: opts.args ?? [],
-    env: mergedStdioEnv(opts.env),
+    env: buildStdioEnv(opts.env, opts.passEnv),
     cwd: opts.cwd,
     // Inherit stderr by default so the operator sees target log
     // output intermixed with the probe's own stderr stream.

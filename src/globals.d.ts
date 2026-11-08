@@ -15,6 +15,7 @@ declare namespace NodeJS {
   interface Process {
     env: ProcessEnv;
     argv: string[];
+    execPath: string;
     exit(code?: number): never;
     cwd(): string;
     stdout: { write(s: string): boolean };
