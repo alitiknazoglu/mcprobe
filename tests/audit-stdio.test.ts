@@ -18,7 +18,12 @@ describe("auditStdio (library entry)", () => {
   it("audits a local stdio server and returns a scored report", async () => {
     expect(existsSync(demoBin), `demo target not built: ${demoBin}`).toBe(true);
 
-    const report = await auditStdio("node", { args: [demoBin], fuzz: true });
+    // The demo target declares no annotations, so its tools need the opt-in.
+    const report = await auditStdio("node", {
+      args: [demoBin],
+      fuzz: true,
+      fuzzUnannotated: true,
+    });
 
     // Same report contract as auditUrl.
     expect(typeof report.overall).toBe("number");

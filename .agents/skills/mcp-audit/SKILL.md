@@ -70,9 +70,11 @@ rather than trying to synthesize a token.
 Fuzzing **calls each tool with malformed input** to test error handling and
 liveness. This is what catches the dangerous problems a linter can't: a tool
 that *silently accepts* garbage (so the agent trusts a wrong result) or one that
-*crashes the session*. It is **dry-run by default** — tools annotated
-`destructiveHint: true` are skipped unless you pass `--fuzz-destructive`, so a
-normal run is safe even on servers you don't own. **Only fuzz servers you're
+*crashes the session*. Fuzzing **calls each tool for real**, so by default it
+only touches tools annotated `readOnlyHint: true` or `destructiveHint: false`.
+`--fuzz-unannotated` adds tools with no safety annotations and
+`--fuzz-destructive` adds everything — ask the user before using either, and
+never against a server holding real data or money. **Only fuzz servers you're
 allowed to test.**
 
 ## How to read the result

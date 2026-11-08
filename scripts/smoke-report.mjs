@@ -81,7 +81,8 @@ try {
   // (2) Run probe_report with fuzz: true.
   const reportResult = await client.callTool({
     name: "probe_report",
-    arguments: { fuzz: true },
+    // The demo target declares no annotations, so opt in to fuzzing them.
+    arguments: { fuzz: true, fuzzUnannotated: true },
   });
   if (reportResult.isError) {
     fail(
@@ -139,9 +140,10 @@ try {
   if (!Array.isArray(cov.skippedDestructive) || !Array.isArray(cov.skippedOverCap)) {
     fail(`coverage skip lists must be arrays: ${JSON.stringify(cov)}`);
   }
-  if (cov.fuzzedTools + cov.skippedDestructive.length + cov.skippedOverCap.length !== cov.totalTools) {
+  const unannotated = cov.skippedUnannotated ?? [];
+  if (cov.fuzzedTools + cov.skippedDestructive.length + unannotated.length + cov.skippedOverCap.length !== cov.totalTools) {
     fail(
-      `coverage does not account for every tool: ${cov.fuzzedTools} + ${cov.skippedDestructive.length} + ${cov.skippedOverCap.length} != ${cov.totalTools}`
+      `coverage does not account for every tool: ${cov.fuzzedTools} + ${cov.skippedDestructive.length} + ${unannotated.length} + ${cov.skippedOverCap.length} != ${cov.totalTools}`
     );
   }
 

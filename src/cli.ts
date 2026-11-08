@@ -26,6 +26,7 @@ interface CliArgs {
   stdio?: string;
   fuzz: boolean;
   fuzzDestructive: boolean;
+  fuzzUnannotated: boolean;
   json: boolean;
   token?: string;
   to?: string;
@@ -58,7 +59,12 @@ function parseHeaderArg(raw: string | undefined): [string, string] {
 }
 
 function parseArgs(rest: string[]): CliArgs {
-  const out: CliArgs = { fuzz: false, fuzzDestructive: false, json: false };
+  const out: CliArgs = {
+    fuzz: false,
+    fuzzDestructive: false,
+    fuzzUnannotated: false,
+    json: false,
+  };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === undefined) continue;
@@ -66,6 +72,9 @@ function parseArgs(rest: string[]): CliArgs {
     else if (a === "--fuzz-destructive") {
       out.fuzz = true;
       out.fuzzDestructive = true;
+    } else if (a === "--fuzz-unannotated") {
+      out.fuzz = true;
+      out.fuzzUnannotated = true;
     } else if (a === "--json") out.json = true;
     else if (a === "--stdio") out.stdio = rest[++i];
     else if (a === "--token") out.token = rest[++i];
@@ -94,7 +103,11 @@ function parseArgs(rest: string[]): CliArgs {
 }
 
 async function runAudit(args: CliArgs): Promise<ConformanceReport> {
-  const opts = { fuzz: args.fuzz, fuzzDestructive: args.fuzzDestructive };
+  const opts = {
+    fuzz: args.fuzz,
+    fuzzDestructive: args.fuzzDestructive,
+    fuzzUnannotated: args.fuzzUnannotated,
+  };
   if (args.stdio) {
     if (args.headers) {
       throw new Error(
@@ -223,8 +236,12 @@ Examples:
   mcprobe push  --stdio "npx @acme/my-mcp-server" --fuzz --token mcp_xxx
 
 Flags:
-  --fuzz                also call each tool with malformed input (behavioral test)
-  --fuzz-destructive    additionally fuzz tools marked destructive (implies --fuzz)
+  --fuzz                call each tool with valid + malformed input (behavioral
+                        test). Only tools annotated readOnlyHint:true or
+                        destructiveHint:false — every fuzzed tool runs for real
+  --fuzz-unannotated    also fuzz tools with no safety annotations (implies --fuzz)
+  --fuzz-destructive    fuzz every tool, even ones marked destructive (implies
+                        --fuzz-unannotated)
   --json                (audit/push) print the report as JSON instead of Markdown
   --stdio "<command>"   audit a local stdio server instead of a URL
   --bearer <token>      credential for the TARGET server (sends Authorization: Bearer)

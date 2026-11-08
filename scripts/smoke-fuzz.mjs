@@ -79,7 +79,8 @@ try {
   // (2) Run probe_fuzz.
   const fuzzResult = await client.callTool({
     name: "probe_fuzz",
-    arguments: {},
+    // The demo target declares no annotations, so opt in to fuzzing them.
+    arguments: { fuzzUnannotated: true },
   });
   if (fuzzResult.isError) {
     fail(

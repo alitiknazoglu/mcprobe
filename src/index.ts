@@ -249,7 +249,7 @@ server.tool(
 // summary of which tools were fuzzed vs skipped.
 server.tool(
   "probe_fuzz",
-  "Generate one valid and several malformed inputs per target tool, call each, and record the outcome (ok, toolError, protocolCrash), whether malformed inputs were silently accepted, and call latency. Tools annotated destructiveHint:true are skipped by default (set fuzzDestructive to include them). Returns a coverage summary of which tools were fuzzed vs skipped.",
+  "Generate one valid and several malformed inputs per target tool, call each, and record the outcome (ok, toolError, protocolCrash), whether malformed inputs were silently accepted, and call latency. Every fuzzed tool is really called. By default only tools annotated readOnlyHint:true or destructiveHint:false are fuzzed; set fuzzUnannotated to include tools without safety annotations, fuzzDestructive to include everything. Returns a coverage summary of which tools were fuzzed vs skipped.",
   {
     connectionId: z
       .string()
@@ -267,6 +267,12 @@ server.tool(
       .describe(
         "Also fuzz tools annotated destructiveHint:true. Default false (the dry-run safety guard) so fuzzing an untrusted target can't trigger a destructive action."
       ),
+    fuzzUnannotated: z
+      .boolean()
+      .optional()
+      .describe(
+        "Also fuzz tools that are not annotated readOnlyHint:true or destructiveHint:false. Default false: per the MCP spec such tools are presumed destructive, and fuzzing calls them for real."
+      ),
   },
   // Invokes the target's tools with malformed inputs — has side effects.
   { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
@@ -277,6 +283,7 @@ server.tool(
       const { results, coverage } = await runFuzz(conn, conn.tools, {
         maxTools: args.maxTools,
         fuzzDestructive: args.fuzzDestructive,
+        fuzzUnannotated: args.fuzzUnannotated,
       });
       return ok({
         connectionId: conn.id,
@@ -323,6 +330,12 @@ server.tool(
       .describe(
         "Forwarded to probe_fuzz when fuzz=true. Also fuzz tools annotated destructiveHint:true (default false — the dry-run safety guard)."
       ),
+    fuzzUnannotated: z
+      .boolean()
+      .optional()
+      .describe(
+        "Also fuzz tools that are not annotated readOnlyHint:true or destructiveHint:false. Default false: per the MCP spec such tools are presumed destructive, and fuzzing calls them for real."
+      ),
   },
   // Lints always; also fuzzes the target's tools when fuzz=true.
   { readOnlyHint: false, openWorldHint: true },
@@ -340,6 +353,7 @@ server.tool(
         ? await runFuzz(conn, conn.tools, {
             maxTools: args.maxTools,
             fuzzDestructive: args.fuzzDestructive,
+            fuzzUnannotated: args.fuzzUnannotated,
           })
         : undefined;
       const fuzzResults = fuzzRun?.results ?? [];

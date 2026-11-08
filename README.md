@@ -171,11 +171,15 @@ node dist/index.js audit --stdio "node ./server.js" --pass-env MY_API_KEY --fuzz
 
 It prints the full Markdown report to stdout — add `--json` for a
 machine-readable report (what the [GitHub Action](#audit-in-ci-github-action)
-and other tooling consume). `--fuzz` also **calls each tool
-with malformed input** to score Error Handling & Liveness; tools the target
-marks `destructiveHint: true` are skipped unless you add `--fuzz-destructive`,
-so a default run is safe even against servers you don't control. Omit `--fuzz`
-for a read-only static audit (metadata + schema quality only).
+and other tooling consume). `--fuzz` also **calls each tool for real** — once
+with a plausible valid input and several times with malformed input — to score
+Error Handling & Liveness. By default it only touches tools the target
+annotates `readOnlyHint: true` or `destructiveHint: false`; the MCP spec
+presumes every other tool destructive. `--fuzz-unannotated` adds tools with no
+safety annotations, and `--fuzz-destructive` adds everything. Only use those
+two against a server you own, on test data — a `send_payment` or `delete_post`
+tool will run. Omit `--fuzz` for a read-only static audit (metadata + schema
+quality only).
 
 **Save an audit to your account.** `push` runs the same audit and uploads the
 report to an ingest endpoint (default `https://mcprobe.org/api/ingest`) with a
@@ -205,7 +209,8 @@ jobs:
       - uses: alitiknazoglu/mcprobe@v1
         with:
           url: https://your-server.example.com/mcp
-          fuzz: true          # behavioral testing (call tools with bad input)
+          fuzz: true          # behavioral testing — really calls read-only/non-destructive tools (default false)
+          # fuzz-unannotated: true  # also call tools with no safety annotations
           min-score: "75"     # fail the job below this (A≥90 B≥75 C≥60 D≥40); omit to report only
 ```
 
@@ -287,7 +292,7 @@ cover the everyday ergonomics of managing connections.
 | --- | --- | --- |
 | `probe_connect` | Open a connection to a target. | `{ connectionId, name, version, capabilities, counts, defaultConnectionId }` |
 | `probe_lint` | Run the 12 lint rules over the target's cached tool summaries. | `{ connectionId, server, findings, summary }` |
-| `probe_fuzz` | Generate valid + malformed inputs per tool, call each, classify the outcome. Skips destructive tools by default. | `{ connectionId, server, results, coverage, summary }` |
+| `probe_fuzz` | Generate valid + malformed inputs per tool, call each, classify the outcome. Only fuzzes tools annotated read-only / non-destructive by default. | `{ connectionId, server, results, coverage, summary }` |
 | `probe_report` | Run lint (and fuzz when requested), score, render Markdown. | `{ connectionId, server, overall, grade, dimensions, coverage, findings, fuzz, markdown }` |
 | `probe_list` | (optional) Enumerate the target's tools. | `{ connectionId, server, tools }` |
 | `probe_disconnect` | (optional) Close one connection (by id) or every connection. | `{ removed, remaining, defaultConnectionId }` |
@@ -379,12 +384,15 @@ as an output-schema violation rather than a misleading "protocol crash"). Not
 credited in **Liveness** — a success that breaks its own contract isn't a real
 success.
 
-**Dry-run safety.** By default, tools annotated `destructiveHint: true`
-are **not** fuzzed — so pointing MCProbe at a server you don't control
-can't trigger a real destructive action (e.g. a `delete_file` tool).
-Pass `fuzzDestructive: true` to override. `probe_fuzz` (and the report)
-return a **coverage** summary listing how many tools were fuzzed and
-which were skipped (as destructive, or over the `maxTools` cap).
+**Dry-run safety.** Fuzzing really calls the target's tools — including a
+"valid" call that does whatever the tool does. So by default only tools
+annotated `readOnlyHint: true` or `destructiveHint: false` are fuzzed. Per the
+MCP spec, a tool without those hints is presumed destructive: it is skipped
+unless you pass `fuzzUnannotated: true` (and MCProbe logs a warning naming
+each such tool it calls). Tools annotated `destructiveHint: true` additionally
+need `fuzzDestructive: true`. `probe_fuzz` (and the report) return a
+**coverage** summary listing how many tools were fuzzed and which were skipped
+(as destructive, as unannotated, or over the `maxTools` cap).
 
 ### `probe_report`
 
@@ -424,7 +432,7 @@ so the score is auditable by a human. When fuzzing runs, the report
 header also shows two extra lines:
 
 - a **Coverage** line (how many tools were fuzzed, and which were skipped
-  as destructive or over the `maxTools` cap); and
+  as destructive, as unannotated, or over the `maxTools` cap); and
 - a **critical-issues callout** — a flag, *not* a second score — hoisting
   the dangerous findings to the top, e.g. `⚠ Critical: 4 tool(s) silently
   accept malformed input (…); 1 protocol crash(es)`, or `✓ No critical
@@ -530,8 +538,8 @@ const teaser = softenReport(report);        // a trimmed view (scores, no detail
 ```
 
 Both default to a static, read-only audit (`fuzz: false`); pass `fuzz: true` to
-also run the behavioral fuzzer (destructive tools are skipped unless
-`fuzzDestructive: true`). `auditUrl` is HTTP-only and side-effect-free, ideal
+also run the behavioral fuzzer (only tools annotated read-only /
+non-destructive, unless `fuzzUnannotated` or `fuzzDestructive` is set). `auditUrl` is HTTP-only and side-effect-free, ideal
 for a hosted backend; `auditStdio` launches a local subprocess, so use it only
 for servers you trust (CLIs, your own machine). `softenReport` is handy for a
 free/preview tier — it keeps the scores and counts but withholds the reasons,
@@ -624,11 +632,13 @@ that proves the build artifact loads over the real protocol.
   does not rescue a failure on another. The static dimensions are
   subtractive; the behavioral dimensions are normalized rates. The four
   dimensions are weighted equally when measured.
-- **Dry-run skips destructive tools.** By default a fuzz run does not
-  exercise tools annotated `destructiveHint: true`; they show up in the
-  coverage summary as skipped. A target that *doesn't* annotate a
-  destructive tool will still be fuzzed — annotations are the only
-  signal MCProbe has. Pass `fuzzDestructive: true` to fuzz everything.
+- **Dry-run fuzzes only tools declared safe.** By default a fuzz run
+  exercises only tools annotated `readOnlyHint: true` or
+  `destructiveHint: false`; the rest show up in the coverage summary as
+  skipped. Annotations are the only signal MCProbe has, so a server that
+  wrongly marks a destructive tool read-only will still have it called.
+  Pass `fuzzUnannotated: true` to include unannotated tools and
+  `fuzzDestructive: true` to fuzz everything.
 - **Behavioral scores need a real protocol round-trip.** When
   `fuzz: false` is passed to `probe_report`, the `Error Handling`
   and `Liveness & Performance` dimensions are reported as

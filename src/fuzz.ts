@@ -44,6 +44,12 @@ export interface RunFuzzOptions {
    *  the dry-run safety guard — so fuzzing a server you don't control can't
    *  trigger a real destructive action. */
   fuzzDestructive?: boolean;
+  /** Also fuzz tools that don't declare themselves safe — no
+   *  `readOnlyHint: true` and no `destructiveHint: false`. Off by default:
+   *  per the MCP spec an unannotated tool is presumed destructive, and every
+   *  fuzzed tool is really called (the `valid` case executes for real).
+   *  Implied by `fuzzDestructive`. */
+  fuzzUnannotated?: boolean;
   /** Override the call function (used by tests). */
   call?: CallFn;
 }
@@ -209,6 +215,16 @@ export function isDestructive(tool: ToolSummary): boolean {
   return tool.annotations?.destructiveHint === true;
 }
 
+/** True when the tool's annotations say calling it is safe: `readOnlyHint:
+ *  true` or `destructiveHint: false`. The MCP spec defaults are readOnlyHint
+ *  false and destructiveHint true, so a tool without either is presumed
+ *  destructive — we can't tell a `get_balance` from a `send_payment`. */
+export function isDeclaredSafe(tool: ToolSummary): boolean {
+  if (isDestructive(tool)) return false;
+  const a = tool.annotations;
+  return a?.readOnlyHint === true || a?.destructiveHint === false;
+}
+
 /** Run the generated cases against the target and classify each outcome.
  *  Pure orchestration: it does not write to any global state; the
  *  caller (the handler in index.ts) threads the result through
@@ -225,18 +241,34 @@ export async function runFuzz(
 ): Promise<FuzzRun> {
   const maxTools = options.maxTools ?? 10;
   const fuzzDestructive = options.fuzzDestructive ?? false;
+  const fuzzUnannotated = fuzzDestructive || (options.fuzzUnannotated ?? false);
   const call: CallFn = options.call
     ? options.call
     : (name, args) => defaultCallTool(connection, name, args);
 
-  // Dry-run safety: unless explicitly opted in, never invoke a tool the
-  // target marks destructive. Eligible tools are then capped by maxTools.
+  // Dry-run safety: unless explicitly opted in, only invoke tools the target
+  // declares safe. Explicitly destructive tools need fuzzDestructive; tools
+  // that say nothing need fuzzUnannotated. Eligible tools are then capped.
   const destructive = tools.filter(isDestructive);
-  const eligible = fuzzDestructive
-    ? tools
-    : tools.filter((t) => !isDestructive(t));
+  const unannotated = tools.filter((t) => !isDestructive(t) && !isDeclaredSafe(t));
+  const eligible = tools.filter((t) => {
+    if (isDestructive(t)) return fuzzDestructive;
+    if (!isDeclaredSafe(t)) return fuzzUnannotated;
+    return true;
+  });
   const fuzzed = eligible.slice(0, maxTools);
   const overCap = eligible.slice(maxTools);
+
+  // Calling a tool that never said it was safe is a real side effect on a
+  // real server. Say so loudly (stderr: stdout may be the JSON-RPC stream).
+  const riskyFuzzed = fuzzed.filter((t) => !isDeclaredSafe(t)).map((t) => t.name);
+  if (riskyFuzzed.length > 0) {
+    console.error(
+      `[mcprobe] WARNING: fuzzing ${riskyFuzzed.length} tool(s) not annotated read-only or ` +
+        `non-destructive — each is called for real, including with a "valid" input: ` +
+        riskyFuzzed.join(", ")
+    );
+  }
 
   const results: FuzzResult[] = [];
   for (const tool of fuzzed) {
@@ -252,6 +284,7 @@ export async function runFuzz(
     totalTools: tools.length,
     fuzzedTools: fuzzed.length,
     skippedDestructive: fuzzDestructive ? [] : destructive.map((t) => t.name),
+    skippedUnannotated: fuzzUnannotated ? [] : unannotated.map((t) => t.name),
     skippedOverCap: overCap.map((t) => t.name),
   };
 

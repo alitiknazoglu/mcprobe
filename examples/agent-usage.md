@@ -111,10 +111,11 @@ Address these to raise the score, worst first:
 
 - **`fuzz: false`** runs a read-only static audit (metadata + schema quality
   only) — no calls to the target, safe against any server.
-- **`fuzz: true`** invokes the target's tools with malformed inputs, but by
-  default it **skips tools the target marks `destructiveHint: true`** (the
-  dry-run guard), so a default fuzz run is safe even against servers you
-  don't control. Pass `fuzzDestructive: true` to fuzz everything. The report
+- **`fuzz: true`** really invokes the target's tools (a valid call plus
+  malformed ones), so by default it **only fuzzes tools annotated
+  `readOnlyHint: true` or `destructiveHint: false`** (the dry-run guard).
+  Pass `fuzzUnannotated: true` to include tools with no safety annotations,
+  `fuzzDestructive: true` to fuzz everything. The report
   includes a **coverage** summary of which tools were fuzzed vs skipped.
 - Every tool returns both a human-readable text block **and** a structured
   payload (`structuredContent`), so an agent can either read the Markdown or

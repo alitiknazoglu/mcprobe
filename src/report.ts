@@ -166,6 +166,12 @@ function renderCoverageLine(c: FuzzCoverage): string {
       `${c.skippedDestructive.length} skipped as destructive (${c.skippedDestructive.join(", ")})`
     );
   }
+  const unannotated = c.skippedUnannotated ?? [];
+  if (unannotated.length > 0) {
+    parts.push(
+      `${unannotated.length} skipped as not annotated read-only/non-destructive (${unannotated.join(", ")}) — opt in with fuzzUnannotated / --fuzz-unannotated`
+    );
+  }
   if (c.skippedOverCap.length > 0) {
     parts.push(`${c.skippedOverCap.length} skipped over the maxTools cap`);
   }

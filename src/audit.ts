@@ -26,8 +26,12 @@ export interface AuditUrlOptions {
   /** Run the behavioral fuzzer (calls the target's tools). Default false —
    *  a static, read-only audit, which is the safe default for a public box. */
   fuzz?: boolean;
-  /** Also fuzz tools annotated destructiveHint:true. Default false. */
+  /** Also fuzz tools annotated destructiveHint:true. Default false.
+   *  Implies fuzzUnannotated. */
   fuzzDestructive?: boolean;
+  /** Also fuzz tools that don't declare readOnlyHint:true or
+   *  destructiveHint:false. Default false — they are called for real. */
+  fuzzUnannotated?: boolean;
   /** Cap on tools fuzzed. Default 10. */
   maxTools?: number;
   /** Custom fetch for the HTTP transport (ignored by auditStdio). An embedder
@@ -75,6 +79,7 @@ async function auditConnection(
       const run = await runFuzz(conn, conn.tools, {
         maxTools: opts.maxTools,
         fuzzDestructive: opts.fuzzDestructive,
+        fuzzUnannotated: opts.fuzzUnannotated,
       });
       fuzz = run.results;
       coverage = run.coverage;

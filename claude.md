@@ -239,11 +239,13 @@ lint, transport, stdio, capability, severity, finding.
 
 ## Fuzzing and scoring
 
-- **Dry-run default.** `runFuzz` (src/fuzz.ts) skips tools annotated
-  `destructiveHint: true` unless `fuzzDestructive` is set, and applies the
-  `maxTools` cap to the remaining eligible tools. It returns
+- **Dry-run default.** `runFuzz` (src/fuzz.ts) only fuzzes tools that declare
+  themselves safe (`readOnlyHint: true` or `destructiveHint: false`; see
+  `isDeclaredSafe`). Unannotated tools need `fuzzUnannotated`, tools annotated
+  `destructiveHint: true` need `fuzzDestructive` (which implies the former). The
+  `maxTools` cap applies to the remaining eligible tools. It returns
   `{ results, coverage }`; `coverage` (totalTools / fuzzedTools /
-  skippedDestructive / skippedOverCap) is threaded into the report and
+  skippedDestructive / skippedUnannotated / skippedOverCap) is threaded into the report and
   rendered as the header **Coverage** line. The header also carries a
   **critical-issues callout** (`renderCriticalLine` in src/report.ts) —
   a flag listing silent-accepting tools + crash count, *not* a second
