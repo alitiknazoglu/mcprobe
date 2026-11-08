@@ -17,6 +17,7 @@
 
 import { auditUrl, auditStdio } from "./audit.js";
 import { renderReport } from "./report.js";
+import { redactUrl } from "./target-client.js";
 import type { ConformanceReport } from "./types.js";
 
 const DEFAULT_ENDPOINT = "https://mcprobe.org/api/ingest";
@@ -58,7 +59,11 @@ function parseHeaderArg(raw: string | undefined): [string, string] {
   return [raw.slice(0, at).trim(), raw.slice(at + 1).trim()];
 }
 
-function parseArgs(rest: string[]): CliArgs {
+/** Parse CLI flags. Exported for tests. */
+export function parseArgs(
+  rest: string[],
+  env: NodeJS.ProcessEnv = process.env
+): CliArgs {
   const out: CliArgs = {
     fuzz: false,
     fuzzDestructive: false,
@@ -95,8 +100,10 @@ function parseArgs(rest: string[]): CliArgs {
     } else if (!a.startsWith("-") && !out.url) out.url = a; // positional URL
   }
   // Env fallback keeps the credential out of shell history. Explicit flags win.
-  const envToken = process.env.MCPROBE_TARGET_TOKEN;
-  if (envToken && !out.headers?.["Authorization"]) {
+  // HTTP targets only: a stdio target takes credentials via its own env, and
+  // applying this to --stdio made every stdio audit fail while it was set.
+  const envToken = env.MCPROBE_TARGET_TOKEN;
+  if (envToken && !out.stdio && !out.headers?.["Authorization"]) {
     (out.headers ??= {})["Authorization"] = `Bearer ${envToken}`;
   }
   return out;
@@ -114,7 +121,7 @@ async function runAudit(args: CliArgs): Promise<ConformanceReport> {
         "--bearer/--header apply to HTTP targets; a stdio server takes credentials via its own env"
       );
     }
-    const parts = args.stdio.trim().split(/\s+/).filter(Boolean);
+    const parts = splitCommandLine(args.stdio);
     const command = parts[0];
     if (!command) throw new Error('--stdio needs a command, e.g. --stdio "npx my-server"');
     return auditStdio(command, {
@@ -124,10 +131,129 @@ async function runAudit(args: CliArgs): Promise<ConformanceReport> {
       passEnv: args.passEnv,
     });
   }
+  if (args.env || args.passEnv) {
+    throw new Error("--env/--pass-env apply to --stdio targets");
+  }
   if (args.url) return auditUrl(args.url, { ...opts, headers: args.headers });
   throw new Error(
     'no target — pass an HTTPS URL or --stdio "<command>" (e.g. --stdio "npx my-server")'
   );
+}
+
+/**
+ * Split a `--stdio` command line into argv the way a POSIX shell would for
+ * the simple cases: whitespace separates words, '…' is literal, "…" allows
+ * \" and \\ escapes, and a backslash outside quotes escapes the next char.
+ * No expansion of variables, globs or `~`. Exported for tests.
+ */
+export function splitCommandLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inWord = false;
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i] as string;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else cur += ch;
+    } else if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === "\\" && (line[i + 1] === '"' || line[i + 1] === "\\")) cur += line[++i];
+      else cur += ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      inWord = true;
+    } else if (ch === "\\" && i + 1 < line.length) {
+      cur += line[++i];
+      inWord = true;
+    } else if (/\s/.test(ch)) {
+      if (inWord) out.push(cur);
+      cur = "";
+      inWord = false;
+    } else {
+      cur += ch;
+      inWord = true;
+    }
+  }
+  if (quote) throw new Error(`--stdio has an unterminated ${quote} quote`);
+  if (inWord) out.push(cur);
+  return out;
+}
+
+/** Flags / env names whose value is a secret. */
+const SECRET_NAME =
+  /(api[-_]?key|token|secret|passw(or)?d|pwd|auth|credential|private[-_]?key|bearer|session|cookie|signature)/i;
+
+/** Values that look like a credential on their own (vendor-prefixed keys,
+ *  JWTs, long opaque alphanumeric strings — no "/" so paths survive). */
+const SECRET_VALUE = new RegExp(
+  [
+    "^(?:(?:sk|pk|rk)[-_]|gh[pousr]_|github_pat_|xox[abprs]-|glpat-|npm_|mcp_)[A-Za-z0-9_-]{8,}$",
+    "^(?:AKIA|ASIA)[A-Z0-9]{12,}$",
+    "^AIza[A-Za-z0-9_-]{20,}$",
+    "^eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.", // JWT
+    "^(?=.*\\d)(?=.*[A-Za-z])[A-Za-z0-9+_=-]{32,}$",
+  ].join("|")
+);
+
+/**
+ * Describe the audited target for upload without leaking secrets in it: a
+ * stdio command line often carries a key (`--api-key sk_…`, `TOKEN=…`), and a
+ * URL can embed credentials. Values after secret-named flags, secret-named
+ * `NAME=value` pairs, credential-shaped values and URL credentials are
+ * replaced with `***`; the home directory becomes `~`. Exported for tests.
+ */
+export function describeTargetForUpload(
+  args: Pick<CliArgs, "stdio" | "url">,
+  home: string | undefined = process.env.HOME
+): string {
+  if (!args.stdio) return redactUrl(args.url ?? "");
+  let parts: string[];
+  try {
+    parts = splitCommandLine(args.stdio);
+  } catch {
+    parts = args.stdio.trim().split(/\s+/);
+  }
+  const out: string[] = [];
+  let redactNext = false;
+  for (const raw of parts) {
+    let p = raw;
+    if (redactNext) {
+      out.push("***");
+      redactNext = false;
+      continue;
+    }
+    const flag = p.match(/^(--?[A-Za-z0-9][\w.-]*)(=(.*))?$/);
+    const assign = p.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (flag && SECRET_NAME.test(flag[1] as string)) {
+      if (flag[2] === undefined) redactNext = true;
+      else p = `${flag[1]}=***`;
+    } else if (assign && SECRET_NAME.test(assign[1] as string)) {
+      p = `${assign[1]}=***`;
+    } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(p)) {
+      p = redactUrl(p);
+    } else if (SECRET_VALUE.test(p)) {
+      p = "***";
+    }
+    if (home && home.length > 1 && p.includes(home)) p = p.split(home).join("~");
+    out.push(/\s/.test(p) ? JSON.stringify(p) : p);
+  }
+  return `stdio: ${out.join(" ")}`;
+}
+
+/** The ingest endpoint receives the bearer token, so it must be https.
+ *  Plain http is allowed only to loopback, for local development. */
+export function checkEndpoint(endpoint: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(endpoint);
+  } catch {
+    return `invalid ingest endpoint: ${redactUrl(endpoint)}`;
+  }
+  if (u.protocol === "https:") return null;
+  const loopback = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i.test(u.host.replace(/:\d+$/, ""));
+  if (u.protocol === "http:" && loopback) return null;
+  return `refusing to send the token to a non-https endpoint: ${redactUrl(endpoint)} (use https://, or http:// only to localhost)`;
 }
 
 /** Run the CLI. Returns a process exit code. */
@@ -145,7 +271,13 @@ export async function runCli(argv: string[]): Promise<number> {
     return 2;
   }
 
-  const args = parseArgs(argv.slice(1));
+  let args: CliArgs;
+  try {
+    args = parseArgs(argv.slice(1));
+  } catch (err) {
+    process.stderr.write(`mcprobe: ${(err as Error).message}\n`);
+    return 2;
+  }
 
   // For push, fail fast on a missing token before spawning/auditing anything.
   const endpoint = args.to || process.env.MCPROBE_API || DEFAULT_ENDPOINT;
@@ -157,6 +289,13 @@ export async function runCli(argv: string[]): Promise<number> {
         "  Create your key at https://mcprobe.org/app/profile\n"
     );
     return 2;
+  }
+  if (cmd === "push") {
+    const bad = checkEndpoint(endpoint);
+    if (bad) {
+      process.stderr.write(`mcprobe: ${bad}\n`);
+      return 2;
+    }
   }
 
   let report: ConformanceReport;
@@ -177,7 +316,8 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   // push: upload the report to the ingest endpoint.
-  const target = args.stdio ? `stdio: ${args.stdio}` : args.url!;
+  // Never upload a raw command line or URL: either can carry a credential.
+  const target = describeTargetForUpload(args);
   let res: Response;
   try {
     res = await fetch(endpoint, {
@@ -209,7 +349,7 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   const data = (await res.json().catch(() => ({}))) as { url?: string };
-  process.stderr.write(`✓ uploaded — ${data.url ?? endpoint}\n`);
+  process.stderr.write(`✓ uploaded — ${data.url ?? redactUrl(endpoint)}\n`);
   // --json emits the full report (parity with `audit --json`); otherwise the
   // short score line. The "uploaded" note above always goes to stderr.
   process.stdout.write(
@@ -249,7 +389,7 @@ Flags:
   --env NAME=VALUE      (stdio) set a variable on the target's environment (repeatable)
   --pass-env NAME       (stdio) forward NAME from this shell to the target (repeatable)
   --token <key>         (push) bearer token for the MCProbe ingest endpoint
-  --to <url>            (push) ingest endpoint (default ${DEFAULT_ENDPOINT})
+  --to <url>            (push) ingest endpoint, https only (default ${DEFAULT_ENDPOINT})
 
   Note: --bearer/--header authenticate you to the server being audited;
   --token authenticates you to MCProbe. Never pass your MCProbe token as

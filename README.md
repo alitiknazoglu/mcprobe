@@ -190,7 +190,14 @@ node dist/index.js push --stdio "npx @acme/my-mcp-server" --fuzz --token mcp_xxx
 ```
 
 The token comes from your mcprobe.org profile; `--to <url>` (or `MCPROBE_API`)
-points it at a different endpoint. Run `mcprobe help` for all flags.
+points it at a different endpoint, which must be `https://` (plain `http://` is
+accepted only for `localhost`). The upload describes the target without its
+secrets: values after flags like `--api-key`/`--token`, `TOKEN=...` pairs,
+key-shaped strings and URL credentials are replaced with `***`. Run
+`mcprobe help` for all flags.
+
+`--stdio` is split like a shell command line, so quote arguments that contain
+spaces: `--stdio "node '/path with spaces/server.js'"`.
 
 ## Audit in CI (GitHub Action)
 
